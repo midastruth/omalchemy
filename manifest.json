@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "id": "midas.tmux-argos",
+  "name": "Agent Status",
+  "version": "1.0.0",
+  "author": "midas",
+  "license": "MIT",
+  "description": "Shows normalized tmux-argos agent state in the Omarchy bar and a keyboard-driven panel.",
+  "kinds": ["bar-widget"],
+  "activation": "on-demand",
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Agent Status",
+    "description": "Pi, Codex, and Claude state from tmux-argos, with tmux session jumping.",
+    "category": "AI",
+    "aliases": ["agents", "tmux-argos", "agent-status"],
+    "allowMultiple": false,
+    "defaults": {
+      "stateFile": "~/.cache/tmux-argos/state.json",
+      "pollIntervalMs": 2000,
+      "notifications": true
+    },
+    "schema": [
+      {
+        "key": "stateFile",
+        "type": "path",
+        "label": "tmux-argos state file",
+        "defaultValue": "~/.cache/tmux-argos/state.json"
+      },
+      {
+        "key": "pollIntervalMs",
+        "type": "integer",
+        "label": "Fallback reload interval (milliseconds)",
+        "min": 1000,
+        "max": 60000,
+        "step": 1000,
+        "defaultValue": 2000
+      },
+      {
+        "key": "notifications",
+        "type": "boolean",
+        "label": "Notify when an agent becomes blocked or done",
+        "defaultValue": true
+      }
+    ]
+  }
+}
