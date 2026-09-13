@@ -8,8 +8,8 @@ import "Model.js" as Model
 
 Panel {
     id: root
-    moduleName: "midas.tmux-argos"
-    ipcTarget: "midas.tmux-argos"
+    moduleName: "midas.omalchemy"
+    ipcTarget: "midas.omalchemy"
     manageIpc: false
 
     property var anchorItem: null
@@ -227,7 +227,7 @@ Panel {
 
                             Text {
                                 width: parent.width
-                                text: "AGENT STATUS"
+                                text: "OMALCHEMY"
                                 color: root.foreground
                                 font.family: root.fontFamily
                                 font.pixelSize: Style.font.body

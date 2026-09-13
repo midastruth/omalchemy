@@ -69,7 +69,7 @@ Item {
                 throw new Error("missing panes array");
         } catch (error) {
             errorText = "Invalid tmux-argos state: " + error;
-            console.warn("midas.tmux-argos:", errorText);
+            console.warn("midas.omalchemy:", errorText);
             return;
         }
 
@@ -127,7 +127,7 @@ Item {
         var row = notificationQueue[0];
         notificationQueue = notificationQueue.slice(1);
         var icon = localPath(Qt.resolvedUrl("assets/" + Model.iconFile(row.state)));
-        notificationProcess.command = ["notify-send", "--app-name=tmux-argos", "--replace-id=" + notificationId(row), "--urgency=" + (row.state === "blocked" ? "critical" : "normal"), "--icon=" + icon, row.agentName + " " + row.state, notificationBody(row)];
+        notificationProcess.command = ["notify-send", "--app-name=omalchemy", "--replace-id=" + notificationId(row), "--urgency=" + (row.state === "blocked" ? "critical" : "normal"), "--icon=" + icon, row.agentName + " " + row.state, notificationBody(row)];
         notificationProcess.running = true;
     }
 

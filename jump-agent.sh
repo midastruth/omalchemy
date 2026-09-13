@@ -7,9 +7,9 @@ window_index=${3-0}
 pane_index=${4-0}
 
 fail() {
-  notify-send --app-name=tmux-argos --urgency=normal \
+  notify-send --app-name=omalchemy --urgency=normal \
     "Unable to open agent" "$1" >/dev/null 2>&1 || true
-  printf 'midas.tmux-argos: %s\n' "$1" >&2
+  printf 'midas.omalchemy: %s\n' "$1" >&2
   exit 1
 }
 

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "id": "midas.tmux-argos",
-  "name": "Agent Status",
+  "id": "midas.omalchemy",
+  "name": "omalchemy",
   "version": "1.0.0",
   "author": "midas",
   "license": "MIT",
@@ -12,10 +12,10 @@
     "barWidget": "Panel.qml"
   },
   "barWidget": {
-    "displayName": "Agent Status",
+    "displayName": "omalchemy",
     "description": "Pi, Codex, and Claude state from tmux-argos, with tmux session jumping.",
     "category": "AI",
-    "aliases": ["agents", "tmux-argos", "agent-status"],
+    "aliases": ["omalchemy", "agents", "tmux-argos"],
     "allowMultiple": false,
     "defaults": {
       "stateFile": "~/.cache/tmux-argos/state.json",

@@ -7,7 +7,7 @@ import "Model.js" as Model
 
 BarWidget {
     id: root
-    moduleName: "midas.tmux-argos"
+    moduleName: "midas.omalchemy"
 
     readonly property var panelItem: panelLoader.item
     readonly property bool opened: panelItem ? panelItem.opened === true : false
@@ -72,7 +72,7 @@ BarWidget {
     }
 
     IpcHandler {
-        target: "midas.tmux-argos"
+        target: "midas.omalchemy"
         function open(): void {
             root.open();
         }

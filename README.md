@@ -1,4 +1,4 @@
-# Agent Status for Omarchy Shell
+# omalchemy
 
 A display-only Quickshell bar plugin for
 `~/.cache/tmux-argos/state.json`. It does not call `capture-pane` and does not
@@ -41,18 +41,18 @@ notifications from the widget settings if desired.
 Copy this directory to the user plugin path and rescan:
 
 ```bash
-mkdir -p ~/.config/omarchy/plugins/midas.tmux-argos
-cp -a . ~/.config/omarchy/plugins/midas.tmux-argos/
+mkdir -p ~/.config/omarchy/plugins/midas.omalchemy
+cp -a . ~/.config/omarchy/plugins/midas.omalchemy/
 omarchy-shell shell rescanPlugins
-omarchy plugin enable midas.tmux-argos
-omarchy bar move midas.tmux-argos --section right
+omarchy plugin enable midas.omalchemy
+omarchy bar move midas.omalchemy --section right
 ```
 
 The plugin supports these inline `shell.json` settings:
 
 ```json
 {
-  "id": "midas.tmux-argos",
+  "id": "midas.omalchemy",
   "stateFile": "~/.cache/tmux-argos/state.json",
   "pollIntervalMs": 2000,
   "notifications": true
