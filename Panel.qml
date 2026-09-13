@@ -140,8 +140,8 @@ BarWidget {
 
             AgentIcon {
                 anchors.horizontalCenter: parent.horizontalCenter
-                width: Style.space(12)
-                height: Style.space(15)
+                width: Style.space(11)
+                height: Style.space(14)
                 color: Model.stateColor(state.dominantState, button.foreground)
             }
 
