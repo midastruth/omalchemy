@@ -117,7 +117,7 @@ BarWidget {
                 anchors.verticalCenter: parent.verticalCenter
                 width: Style.space(13)
                 height: Style.space(16)
-                color: button.foreground
+                color: Model.stateColor(state.dominantState, button.foreground)
             }
 
             Text {
@@ -142,7 +142,7 @@ BarWidget {
                 anchors.horizontalCenter: parent.horizontalCenter
                 width: Style.space(11)
                 height: Style.space(14)
-                color: button.foreground
+                color: Model.stateColor(state.dominantState, button.foreground)
             }
 
             Text {
