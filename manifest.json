@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "midas.omalchemy",
   "name": "omalchemy",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "midas",
   "license": "MIT",
   "description": "Shows normalized tmux-argos agent state in the Omarchy bar and a keyboard-driven panel.",
@@ -20,6 +20,7 @@
     "defaults": {
       "stateFile": "~/.cache/tmux-argos/state.json",
       "pollIntervalMs": 2000,
+      "showCount": true,
       "notifications": true
     },
     "schema": [
@@ -39,9 +40,17 @@
         "defaultValue": 2000
       },
       {
+        "key": "showCount",
+        "type": "boolean",
+        "label": "Show agent count",
+        "description": "Show the dominant state count next to the status icon.",
+        "defaultValue": true
+      },
+      {
         "key": "notifications",
         "type": "boolean",
-        "label": "Notify when an agent becomes blocked or done",
+        "label": "Enable notifications",
+        "description": "Notify when an agent becomes blocked or done.",
         "defaultValue": true
       }
     ]

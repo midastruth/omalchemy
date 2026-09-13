@@ -121,7 +121,7 @@ BarWidget {
             }
 
             Text {
-                visible: state.dominantCount > 0
+                visible: state.showCount && state.dominantCount > 0
                 anchors.verticalCenter: parent.verticalCenter
                 textFormat: Text.PlainText
                 text: String(state.dominantCount)
@@ -146,7 +146,7 @@ BarWidget {
             }
 
             Text {
-                visible: state.dominantCount > 0
+                visible: state.showCount && state.dominantCount > 0
                 anchors.horizontalCenter: parent.horizontalCenter
                 textFormat: Text.PlainText
                 text: String(state.dominantCount)

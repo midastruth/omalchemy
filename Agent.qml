@@ -32,6 +32,37 @@ Panel {
     property int selectedIndex: 0
     property double nowSeconds: Date.now() / 1000
     property string jumpError: ""
+    property bool settingsOpen: false
+
+    readonly property bool showCount: setting("showCount", true) !== false
+    readonly property bool notificationsEnabled: setting("notifications", true) !== false
+
+    function persistWidgetSettings(overrides) {
+        var entry = { id: root.moduleName };
+        var current = settings && typeof settings === "object" && !Array.isArray(settings) ? settings : {};
+        for (var key in current) {
+            if (key !== "id" && key !== "__proto__" && key !== "constructor" && key !== "prototype")
+                entry[key] = current[key];
+        }
+        for (var overrideKey in overrides) {
+            if (overrideKey !== "id" && overrideKey !== "__proto__" && overrideKey !== "constructor" && overrideKey !== "prototype")
+                entry[overrideKey] = overrides[overrideKey];
+        }
+
+        root.settings = entry;
+        if (hostWidget && "settings" in hostWidget)
+            hostWidget.settings = entry;
+        if (bar && bar.shell && typeof bar.shell.updateEntryInline === "function")
+            bar.shell.updateEntryInline(root.moduleName, entry);
+    }
+
+    function setShowCount(enabled) {
+        persistWidgetSettings({ showCount: enabled === true });
+    }
+
+    function setNotificationsEnabled(enabled) {
+        persistWidgetSettings({ notifications: enabled === true });
+    }
 
     function clampSelection() {
         if (agents.length === 0)
@@ -132,14 +163,18 @@ Panel {
         return target + " · " + flags.join(" · ") + " · " + changedText(row.changedAt);
     }
 
-    onOpenedChanged: if (opened) {
-        refresh();
-        clampSelection();
-        nowSeconds = Date.now() / 1000;
-        Qt.callLater(function () {
-            keyCatcher.forceActiveFocus();
-            root.ensureSelectionVisible();
-        });
+    onOpenedChanged: {
+        if (opened) {
+            refresh();
+            clampSelection();
+            nowSeconds = Date.now() / 1000;
+            Qt.callLater(function () {
+                keyCatcher.forceActiveFocus();
+                root.ensureSelectionVisible();
+            });
+        } else {
+            settingsOpen = false;
+        }
     }
 
     Connections {
@@ -185,14 +220,16 @@ Panel {
                 if (dy !== 0)
                     root.moveSelection(dy);
             }
-            onActivateRequested: root.jumpSelected()
+            onActivateRequested: if (!root.settingsOpen) root.jumpSelected()
             onCloseRequested: root.close()
             onTabRequested: function (direction) {
                 root.switchPanel(direction);
             }
             onTextKey: function (text) {
-                if (text === "r" || text === "R")
+                if ((text === "r" || text === "R") && !root.settingsOpen)
                     root.refresh();
+                else if (text === "s" || text === "S")
+                    root.settingsOpen = !root.settingsOpen;
             }
 
             Flickable {
@@ -215,19 +252,19 @@ Panel {
 
                     Item {
                         width: parent.width
-                        height: Math.max(titleColumn.implicitHeight, refreshButton.implicitHeight)
+                        height: Math.max(titleColumn.implicitHeight, headerActions.implicitHeight)
 
                         Column {
                             id: titleColumn
                             anchors.left: parent.left
-                            anchors.right: refreshButton.left
+                            anchors.right: headerActions.left
                             anchors.rightMargin: Style.space(12)
                             anchors.verticalCenter: parent.verticalCenter
                             spacing: Style.space(2)
 
                             Text {
                                 width: parent.width
-                                text: "OMALCHEMY"
+                                text: root.settingsOpen ? "SETTINGS" : "OMALCHEMY"
                                 color: root.foreground
                                 font.family: root.fontFamily
                                 font.pixelSize: Style.font.body
@@ -237,7 +274,7 @@ Panel {
 
                             Text {
                                 width: parent.width
-                                text: root.statusSummary()
+                                text: root.settingsOpen ? "Display and notification preferences" : root.statusSummary()
                                 color: root.dim
                                 font.family: root.fontFamily
                                 font.pixelSize: Style.font.caption
@@ -245,15 +282,28 @@ Panel {
                             }
                         }
 
-                        Button {
-                            id: refreshButton
+                        Row {
+                            id: headerActions
                             anchors.right: parent.right
                             anchors.verticalCenter: parent.verticalCenter
-                            iconText: "󰑐"
-                            tooltipText: "Reload state (r)"
-                            foreground: root.foreground
-                            fontFamily: root.fontFamily
-                            onClicked: root.refresh()
+                            spacing: Style.space(4)
+
+                            PanelActionButton {
+                                visible: !root.settingsOpen
+                                iconText: "󰑐"
+                                tooltipText: "Reload state (r)"
+                                foreground: root.foreground
+                                fontFamily: root.fontFamily
+                                onClicked: root.refresh()
+                            }
+
+                            PanelActionButton {
+                                iconText: root.settingsOpen ? "󰁍" : "󰒓"
+                                tooltipText: root.settingsOpen ? "Back to agents" : "Settings (s)"
+                                foreground: root.foreground
+                                fontFamily: root.fontFamily
+                                onClicked: root.settingsOpen = !root.settingsOpen
+                            }
                         }
                     }
 
@@ -262,8 +312,56 @@ Panel {
                         foreground: root.foreground
                     }
 
+                    Column {
+                        visible: root.settingsOpen
+                        width: parent.width
+                        spacing: Style.space(8)
+
+                        PanelSectionHeader {
+                            text: "STATUS BAR"
+                            foreground: root.foreground
+                            fontFamily: root.fontFamily
+                        }
+
+                        Toggle {
+                            width: parent.width
+                            label: "Show agent count"
+                            description: "Show the dominant state count next to the status icon."
+                            checked: root.showCount
+                            foreground: root.foreground
+                            fontFamily: root.fontFamily
+                            onClicked: root.setShowCount(!root.showCount)
+                        }
+
+                        PanelSectionHeader {
+                            text: "NOTIFICATIONS"
+                            foreground: root.foreground
+                            fontFamily: root.fontFamily
+                        }
+
+                        Toggle {
+                            width: parent.width
+                            label: "Enable notifications"
+                            description: "Notify when an agent becomes blocked or done."
+                            checked: root.notificationsEnabled
+                            foreground: root.foreground
+                            fontFamily: root.fontFamily
+                            onClicked: root.setNotificationsEnabled(!root.notificationsEnabled)
+                        }
+
+                        Text {
+                            width: parent.width
+                            topPadding: Style.space(4)
+                            text: "Changes apply immediately · s back · Esc close"
+                            color: root.dim
+                            font.family: root.fontFamily
+                            font.pixelSize: Style.font.caption
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+                    }
+
                     Text {
-                        visible: root.agents.length === 0
+                        visible: !root.settingsOpen && root.agents.length === 0
                         width: parent.width
                         topPadding: Style.space(24)
                         bottomPadding: Style.space(24)
@@ -277,7 +375,7 @@ Panel {
 
                     Repeater {
                         id: agentRepeater
-                        model: root.agents
+                        model: root.settingsOpen ? [] : root.agents
 
                         BorderSurface {
                             id: agentRow
@@ -360,10 +458,10 @@ Panel {
                     }
 
                     Text {
-                        visible: root.agents.length > 0
+                        visible: !root.settingsOpen && root.agents.length > 0
                         width: parent.width
                         topPadding: Style.space(2)
-                        text: "j/k select · Enter/click jump · r reload · Esc close"
+                        text: "j/k select · Enter/click jump · r reload · s settings · Esc close"
                         color: root.dim
                         font.family: root.fontFamily
                         font.pixelSize: Style.font.caption

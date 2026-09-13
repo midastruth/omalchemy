@@ -14,6 +14,7 @@ Item {
     readonly property string configuredPath: String(setting("stateFile", "~/.cache/tmux-argos/state.json"))
     readonly property string statePath: expandPath(configuredPath)
     readonly property int pollIntervalMs: Math.max(1000, Number(setting("pollIntervalMs", 2000)) || 2000)
+    readonly property bool showCount: setting("showCount", true) !== false
     readonly property bool notificationsEnabled: setting("notifications", true) !== false
 
     property var agents: []
