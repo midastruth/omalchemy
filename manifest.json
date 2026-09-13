@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "midas.omalchemy",
   "name": "omalchemy",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "author": "midas",
   "license": "MIT",
   "description": "Shows normalized tmux-argos agent state in the Omarchy bar and a keyboard-driven panel.",

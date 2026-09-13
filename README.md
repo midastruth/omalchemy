@@ -35,9 +35,10 @@ the most recently active tmux client. If no client is attached, it opens a
 terminal and attaches to the target.
 
 A desktop notification is sent only when a pane transitions to `blocked` or
-`done`. Existing states are seeded silently when the plugin starts. The widget
-settings page provides separate toggles for the count and notifications. Open
-it from the gear button in the panel header or by pressing `s`.
+`done`. Existing states are seeded silently when the plugin starts, and the
+same transition is deduplicated across per-monitor widget instances. The
+widget settings page provides separate toggles for the count and notifications.
+Open it from the gear button in the panel header or by pressing `s`.
 
 ## Install
 

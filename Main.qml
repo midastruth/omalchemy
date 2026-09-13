@@ -84,8 +84,9 @@ Item {
 
         if (initialized && notificationsEnabled) {
             var notices = Model.transitionNotices(previousStates, next);
+            var documentGeneratedAt = Number(document.generatedAt || 0);
             for (var i = 0; i < notices.length; i++)
-                enqueueNotification(notices[i]);
+                enqueueNotification(notices[i], documentGeneratedAt);
         }
 
         previousStates = Model.stateMap(next);
@@ -105,8 +106,9 @@ Item {
         return location + (tmuxLocation !== "" ? "\n" + tmuxLocation : "");
     }
 
-    // Every monitor has a widget instance. A stable replace id makes their
-    // identical transition notifications collapse into one desktop toast.
+    // Every monitor has a widget instance. The helper serializes identical
+    // events across those instances; this id also lets later state changes
+    // replace the pane's existing notification.
     function notificationId(row) {
         var value = String(row.key || row.sessionName || "agent");
         var hash = 5381;
@@ -117,18 +119,24 @@ Item {
 
     property var notificationQueue: []
 
-    function enqueueNotification(row) {
-        notificationQueue = notificationQueue.concat([row]);
+    function enqueueNotification(row, documentGeneratedAt) {
+        var eventTime = Number(row.changedAt || documentGeneratedAt || 0);
+        notificationQueue = notificationQueue.concat([{
+            row: row,
+            eventToken: row.state + ":" + String(eventTime)
+        }]);
         runNextNotification();
     }
 
     function runNextNotification() {
         if (notificationProcess.running || notificationQueue.length === 0)
             return;
-        var row = notificationQueue[0];
+        var notice = notificationQueue[0];
+        var row = notice.row;
         notificationQueue = notificationQueue.slice(1);
         var icon = localPath(Qt.resolvedUrl("assets/" + Model.iconFile(row.state)));
-        notificationProcess.command = ["notify-send", "--app-name=omalchemy", "--replace-id=" + notificationId(row), "--urgency=" + (row.state === "blocked" ? "critical" : "normal"), "--icon=" + icon, row.agentName + " " + row.state, notificationBody(row)];
+        var urgency = row.state === "blocked" ? "critical" : "normal";
+        notificationProcess.command = ["bash", localPath(Qt.resolvedUrl("notify-agent.sh")), String(notificationId(row)), notice.eventToken, urgency, icon, row.agentName + " " + row.state, notificationBody(row)];
         notificationProcess.running = true;
     }
 
