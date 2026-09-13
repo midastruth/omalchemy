@@ -210,7 +210,7 @@ Panel {
         open: root.opened
         focusTarget: keyCatcher
         contentWidth: panel.fittedContentWidth(Style.space(440))
-        contentHeight: panel.fittedContentHeight(Math.min(contentColumn.implicitHeight, Style.space(620)))
+        contentHeight: panel.fittedContentHeight(Math.min(fixedHeader.implicitHeight + Style.space(10) + contentColumn.implicitHeight, Style.space(620)))
 
         PanelKeyCatcher {
             id: keyCatcher
@@ -232,9 +232,83 @@ Panel {
                     root.settingsOpen = !root.settingsOpen;
             }
 
+            Column {
+                id: fixedHeader
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.right: parent.right
+                spacing: Style.space(10)
+
+                Item {
+                    width: parent.width
+                    height: Math.max(titleColumn.implicitHeight, headerActions.implicitHeight)
+
+                    Column {
+                        id: titleColumn
+                        anchors.left: parent.left
+                        anchors.right: headerActions.left
+                        anchors.rightMargin: Style.space(12)
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: Style.space(2)
+
+                        Text {
+                            width: parent.width
+                            text: root.settingsOpen ? "SETTINGS" : "OMALCHEMY"
+                            color: root.foreground
+                            font.family: root.fontFamily
+                            font.pixelSize: Style.font.body
+                            font.bold: true
+                            font.letterSpacing: 1.4
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: root.settingsOpen ? "Display and notification preferences" : root.statusSummary()
+                            color: root.dim
+                            font.family: root.fontFamily
+                            font.pixelSize: Style.font.caption
+                            elide: Text.ElideRight
+                        }
+                    }
+
+                    Row {
+                        id: headerActions
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: Style.space(4)
+
+                        PanelActionButton {
+                            visible: !root.settingsOpen
+                            iconText: "󰑐"
+                            tooltipText: "Reload state (r)"
+                            foreground: root.foreground
+                            fontFamily: root.fontFamily
+                            onClicked: root.refresh()
+                        }
+
+                        PanelActionButton {
+                            iconText: root.settingsOpen ? "󰁍" : "󰒓"
+                            tooltipText: root.settingsOpen ? "Back to agents" : "Settings (s)"
+                            foreground: root.foreground
+                            fontFamily: root.fontFamily
+                            onClicked: root.settingsOpen = !root.settingsOpen
+                        }
+                    }
+                }
+
+                PanelSeparator {
+                    width: parent.width
+                    foreground: root.foreground
+                }
+            }
+
             Flickable {
                 id: listFlick
-                anchors.fill: parent
+                anchors.top: fixedHeader.bottom
+                anchors.topMargin: Style.space(10)
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
                 contentWidth: width
                 contentHeight: contentColumn.implicitHeight
                 clip: true
@@ -249,68 +323,6 @@ Panel {
                     id: contentColumn
                     width: listFlick.width
                     spacing: Style.space(10)
-
-                    Item {
-                        width: parent.width
-                        height: Math.max(titleColumn.implicitHeight, headerActions.implicitHeight)
-
-                        Column {
-                            id: titleColumn
-                            anchors.left: parent.left
-                            anchors.right: headerActions.left
-                            anchors.rightMargin: Style.space(12)
-                            anchors.verticalCenter: parent.verticalCenter
-                            spacing: Style.space(2)
-
-                            Text {
-                                width: parent.width
-                                text: root.settingsOpen ? "SETTINGS" : "OMALCHEMY"
-                                color: root.foreground
-                                font.family: root.fontFamily
-                                font.pixelSize: Style.font.body
-                                font.bold: true
-                                font.letterSpacing: 1.4
-                            }
-
-                            Text {
-                                width: parent.width
-                                text: root.settingsOpen ? "Display and notification preferences" : root.statusSummary()
-                                color: root.dim
-                                font.family: root.fontFamily
-                                font.pixelSize: Style.font.caption
-                                elide: Text.ElideRight
-                            }
-                        }
-
-                        Row {
-                            id: headerActions
-                            anchors.right: parent.right
-                            anchors.verticalCenter: parent.verticalCenter
-                            spacing: Style.space(4)
-
-                            PanelActionButton {
-                                visible: !root.settingsOpen
-                                iconText: "󰑐"
-                                tooltipText: "Reload state (r)"
-                                foreground: root.foreground
-                                fontFamily: root.fontFamily
-                                onClicked: root.refresh()
-                            }
-
-                            PanelActionButton {
-                                iconText: root.settingsOpen ? "󰁍" : "󰒓"
-                                tooltipText: root.settingsOpen ? "Back to agents" : "Settings (s)"
-                                foreground: root.foreground
-                                fontFamily: root.fontFamily
-                                onClicked: root.settingsOpen = !root.settingsOpen
-                            }
-                        }
-                    }
-
-                    PanelSeparator {
-                        width: parent.width
-                        foreground: root.foreground
-                    }
 
                     Column {
                         visible: root.settingsOpen
