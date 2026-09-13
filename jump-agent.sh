@@ -68,16 +68,36 @@ if command -v hyprctl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 && [[ $cl
   pid=$client_pid
   while [[ $pid =~ ^[0-9]+$ ]] && (( pid > 1 )); do
     ancestors[$pid]=1
-    [[ -r /proc/$pid/stat ]] || break
-    parent=$(awk '{print $4}' "/proc/$pid/stat" 2>/dev/null || true)
+    [[ -r /proc/$pid/status ]] || break
+    # /proc/<pid>/stat cannot be split safely because process names may
+    # contain spaces (tmux uses "tmux: client").
+    parent=$(awk '/^PPid:/ { print $2; exit }' "/proc/$pid/status" 2>/dev/null || true)
     [[ $parent =~ ^[0-9]+$ && $parent != "$pid" ]] || break
     pid=$parent
   done
 
-  while IFS=$'\t' read -r window_pid address; do
+  while IFS=$'\t' read -r window_pid address workspace_id workspace_name; do
     if [[ -n ${ancestors[$window_pid]+x} && -n $address ]]; then
-      hyprctl dispatch focuswindow "address:$address" >/dev/null 2>&1 || true
+      # Hyprland 0.56 dispatches Lua actions. Try that API first, while keeping
+      # the legacy dispatcher as a fallback for older Hyprland releases.
+      workspace_target=
+      if [[ $workspace_id =~ ^[0-9]+$ ]]; then
+        workspace_target=$workspace_id
+      elif [[ -n $workspace_name && $workspace_name != special:* ]]; then
+        workspace_target="name:$workspace_name"
+      fi
+      if [[ -n $workspace_target ]]; then
+        workspace_lua=$(jq -n --arg value "$workspace_target" '$value')
+        hyprctl dispatch "hl.dsp.focus({ workspace = $workspace_lua })" >/dev/null 2>&1 \
+          || hyprctl dispatch workspace "$workspace_target" >/dev/null 2>&1 \
+          || true
+      fi
+
+      window_lua=$(jq -n --arg value "address:$address" '$value')
+      hyprctl dispatch "hl.dsp.focus({ window = $window_lua })" >/dev/null 2>&1 \
+        || hyprctl dispatch focuswindow "address:$address" >/dev/null 2>&1 \
+        || true
       break
     fi
-  done < <(hyprctl -j clients 2>/dev/null | jq -r '.[] | [.pid, .address] | @tsv' 2>/dev/null)
+  done < <(hyprctl -j clients 2>/dev/null | jq -r '.[] | [.pid, .address, .workspace.id, .workspace.name] | @tsv' 2>/dev/null)
 fi
