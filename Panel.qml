@@ -113,15 +113,11 @@ BarWidget {
             spacing: Style.space(5)
             visible: !root.vertical
 
-            Image {
+            AgentIcon {
                 anchors.verticalCenter: parent.verticalCenter
-                width: Style.space(15)
-                height: Style.space(18)
-                source: Qt.resolvedUrl("assets/" + Model.iconFile(state.dominantState))
-                sourceSize.width: width * 2
-                sourceSize.height: height * 2
-                fillMode: Image.PreserveAspectFit
-                smooth: true
+                width: Style.space(13)
+                height: Style.space(16)
+                color: button.foreground
             }
 
             Text {
@@ -142,14 +138,11 @@ BarWidget {
             spacing: Style.space(2)
             visible: root.vertical
 
-            Image {
+            AgentIcon {
                 anchors.horizontalCenter: parent.horizontalCenter
-                width: Style.space(13)
-                height: Style.space(16)
-                source: Qt.resolvedUrl("assets/" + Model.iconFile(state.dominantState))
-                sourceSize.width: width * 2
-                sourceSize.height: height * 2
-                fillMode: Image.PreserveAspectFit
+                width: Style.space(11)
+                height: Style.space(14)
+                color: button.foreground
             }
 
             Text {
