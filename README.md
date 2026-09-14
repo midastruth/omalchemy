@@ -32,8 +32,10 @@ target, visibility, attachment state, and state-change time.
 
 Jumping prefers the desktop tmux client already displaying the selected pane,
 then another desktop client attached to the session, and focuses that client's
-terminal workspace. SSH and other headless clients are ignored; if no desktop
-client is attached, it opens a terminal and attaches to the target.
+terminal workspace. Pinned pop-out terminals are raised on the current
+workspace instead of jumping back to their original workspace. SSH and other
+headless clients are ignored; if no desktop client is attached, it opens a
+terminal and attaches to the target.
 
 A desktop notification is sent only when a pane transitions to `blocked` or
 `done`. Existing states are seeded silently when the plugin starts, and the

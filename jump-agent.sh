@@ -30,33 +30,38 @@ hypr_available=false
 declare -A hypr_address_by_pid=()
 declare -A hypr_workspace_id_by_pid=()
 declare -A hypr_workspace_name_by_pid=()
+declare -A hypr_pinned_by_pid=()
 if command -v hyprctl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
   hypr_clients=$(hyprctl -j clients 2>/dev/null || true)
   if jq -e 'type == "array"' >/dev/null 2>&1 <<<"$hypr_clients"; then
     hypr_available=true
-    while IFS=$'\t' read -r window_pid address workspace_id workspace_name; do
+    while IFS=$'\t' read -r window_pid address workspace_id workspace_name pinned; do
       [[ $window_pid =~ ^[0-9]+$ && -n $address ]] || continue
       hypr_address_by_pid[$window_pid]=$address
       hypr_workspace_id_by_pid[$window_pid]=$workspace_id
       hypr_workspace_name_by_pid[$window_pid]=$workspace_name
-    done < <(jq -r '.[] | [.pid, .address, .workspace.id, .workspace.name] | @tsv' <<<"$hypr_clients")
+      hypr_pinned_by_pid[$window_pid]=$pinned
+    done < <(jq -r '.[] | [.pid, .address, .workspace.id, .workspace.name, .pinned] | @tsv' <<<"$hypr_clients")
   fi
 fi
 
 window_address=
 window_workspace_id=
 window_workspace_name=
+window_pinned=false
 find_hypr_window() {
   local process_pid=$1 parent
   window_address=
   window_workspace_id=
   window_workspace_name=
+  window_pinned=false
 
   while [[ $process_pid =~ ^[0-9]+$ ]] && (( process_pid > 1 )); do
     if [[ -n ${hypr_address_by_pid[$process_pid]+x} ]]; then
       window_address=${hypr_address_by_pid[$process_pid]}
       window_workspace_id=${hypr_workspace_id_by_pid[$process_pid]}
       window_workspace_name=${hypr_workspace_name_by_pid[$process_pid]}
+      window_pinned=${hypr_pinned_by_pid[$process_pid]}
       return 0
     fi
     [[ -r /proc/$process_pid/status ]] || break
@@ -79,6 +84,7 @@ client_priority=-1
 client_address=
 client_workspace_id=
 client_workspace_name=
+client_pinned=false
 while IFS=$'\t' read -r tty pid activity current_session current_pane; do
   [[ -n $tty && $pid =~ ^[0-9]+$ ]] || continue
   [[ $activity =~ ^[0-9]+$ ]] || activity=0
@@ -86,11 +92,13 @@ while IFS=$'\t' read -r tty pid activity current_session current_pane; do
   candidate_address=
   candidate_workspace_id=
   candidate_workspace_name=
+  candidate_pinned=false
   if $hypr_available; then
     find_hypr_window "$pid" || continue
     candidate_address=$window_address
     candidate_workspace_id=$window_workspace_id
     candidate_workspace_name=$window_workspace_name
+    candidate_pinned=$window_pinned
   fi
 
   priority=0
@@ -103,6 +111,7 @@ while IFS=$'\t' read -r tty pid activity current_session current_pane; do
     client_address=$candidate_address
     client_workspace_id=$candidate_workspace_id
     client_workspace_name=$candidate_workspace_name
+    client_pinned=$candidate_pinned
   fi
 done < <(tmux list-clients -F $'#{client_tty}\t#{client_pid}\t#{client_activity}\t#{session_name}\t#{pane_id}' 2>/dev/null || true)
 
@@ -120,9 +129,11 @@ if $hypr_available && [[ -n $client_address ]]; then
   # Hyprland 0.56 dispatches Lua actions. Try that API first, while keeping
   # legacy dispatchers as fallbacks for older releases.
   workspace_target=
-  if [[ $client_workspace_id =~ ^[0-9]+$ ]]; then
+  # Omarchy pop-out windows are pinned and already follow the current
+  # workspace, so focusing one must not jump back to its original workspace.
+  if [[ $client_pinned != true && $client_workspace_id =~ ^[0-9]+$ ]]; then
     workspace_target=$client_workspace_id
-  elif [[ -n $client_workspace_name && $client_workspace_name != special:* ]]; then
+  elif [[ $client_pinned != true && -n $client_workspace_name && $client_workspace_name != special:* ]]; then
     workspace_target="name:$client_workspace_name"
   fi
   if [[ -n $workspace_target ]]; then
@@ -136,7 +147,7 @@ if $hypr_available && [[ -n $client_address ]]; then
   # returned windows and pass the matching window object to the focus action.
   # Raise an error when it disappeared so the legacy fallback is attempted.
   address_lua=$(jq -n --arg value "$client_address" '$value')
-  focus_lua="local address = $address_lua; for _, window in ipairs(hl.get_windows({})) do if window.address == address then hl.dispatch(hl.dsp.focus({ window = window })); return end end; error('window not found: ' .. address)"
+  focus_lua="local address = $address_lua; for _, window in ipairs(hl.get_windows({})) do if window.address == address then hl.dispatch(hl.dsp.focus({ window = window })); hl.dispatch(hl.dsp.window.bring_to_top({ window = window })); return end end; error('window not found: ' .. address)"
   hyprctl eval "$focus_lua" >/dev/null 2>&1 \
     || hyprctl dispatch focuswindow "address:$client_address" >/dev/null 2>&1 \
     || true
