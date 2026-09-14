@@ -17,6 +17,21 @@ function normalizedState(value) {
   return ["blocked", "working", "done", "idle"].indexOf(state) >= 0 ? state : "idle"
 }
 
+function normalizedPopupHost(value) {
+  if (!value) return null
+  var client = text(value.client)
+  var sessionId = text(value.sessionId)
+  var windowId = text(value.windowId)
+  var paneId = text(value.paneId)
+  if (client === "" || sessionId === "" || windowId === "" || paneId === "") return null
+  return {
+    client: client,
+    sessionId: sessionId,
+    windowId: windowId,
+    paneId: paneId
+  }
+}
+
 function rowKey(pane) {
   var paneId = text(pane.paneId)
   if (paneId !== "") return paneId
@@ -75,7 +90,9 @@ function normalize(document) {
       paneActive: bool(pane.paneActive),
       windowActive: bool(pane.windowActive),
       visible: bool(pane.visible),
-      sessionAttached: bool(pane.sessionAttached)
+      sessionAttached: bool(pane.sessionAttached),
+      popupHost: normalizedPopupHost(pane.popupHost),
+      popupActive: bool(pane.popupActive)
     })
   }
 

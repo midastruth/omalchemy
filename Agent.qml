@@ -110,7 +110,20 @@ Panel {
         if (!row || jumpProcess.running)
             return;
         jumpError = "";
-        jumpProcess.command = ["bash", localPath(Qt.resolvedUrl("jump-agent.sh")), row.paneId, row.sessionName, String(row.windowIndex), String(row.paneIndex)];
+        var popupHost = row.popupHost || ({});
+        jumpProcess.command = [
+            "bash",
+            localPath(Qt.resolvedUrl("jump-agent.sh")),
+            row.paneId,
+            row.sessionName,
+            String(row.windowIndex),
+            String(row.paneIndex),
+            String(popupHost.client || ""),
+            String(popupHost.sessionId || ""),
+            String(popupHost.windowId || ""),
+            String(popupHost.paneId || ""),
+            row.popupActive ? "true" : "false"
+        ];
         jumpProcess.running = true;
         close();
     }

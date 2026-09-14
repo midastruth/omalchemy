@@ -1,9 +1,8 @@
 # omalchemy
 
-A display-only Quickshell bar plugin for
-`~/.cache/tmux-argos/state.json`. It does not call `capture-pane` and does not
-infer agent state; it only presents the normalized state written by
-tmux-argos.
+A Quickshell bar plugin for `~/.cache/tmux-argos/state.json`. It does not call
+`capture-pane` or infer agent state; it presents the normalized state written
+by tmux-argos and reports when a `done` pane is opened.
 
 ## Bar
 
@@ -30,12 +29,20 @@ target, visibility, attachment state, and state-change time.
 - Click the gear button or press `s`: open/close settings
 - Esc: close the panel
 
-Jumping prefers the desktop tmux client already displaying the selected pane,
-then another desktop client attached to the session, and focuses that client's
-terminal workspace. Pinned pop-out terminals are raised on the current
-workspace instead of jumping back to their original workspace. SSH and other
-headless clients are ignored; if no desktop client is attached, it opens a
-terminal and attaches to the target.
+When tmux-argos reports that an agent is already displayed in a popup, jumping
+focuses the popup's host terminal without switching its outer tmux client. If
+the popup was closed and the agent is running in the background, jumping
+restores the host client to the recorded outer tmux window and reopens the
+popup there. If the original client disappeared but the recorded window still
+exists, another graphical client is moved to that window before opening the
+popup. Only a deleted recorded window causes a fallback to the replacement
+client's current window; deleted tmux sessions are never recreated implicitly.
+Agents without a popup preference retain the direct pane-switch behavior. After
+opening the pane, omalchemy sends tmux-argos a
+`Seen` event so a `done` state becomes `idle`. Pinned pop-out terminals are
+raised on the current workspace instead of jumping back to their original
+workspace. SSH and other headless clients are ignored; if no desktop client is
+attached, it opens a terminal and attaches to the target.
 
 A desktop notification is sent only when a pane transitions to `blocked` or
 `done`. Existing states are seeded silently when the plugin starts, and the
