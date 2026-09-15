@@ -10,7 +10,6 @@ popup_host_client=${5-}
 popup_host_session_id=${6-}
 popup_host_window_id=${7-}
 popup_host_pane_id=${8-}
-popup_active_from_state=${9-false}
 
 popup_host_valid=false
 if [[ -n $popup_host_client && $popup_host_session_id =~ ^\$[0-9]+$ &&
@@ -35,16 +34,12 @@ if [[ -n $pane_id ]]; then
   [[ $pane_session == "$session_name" ]] && target=$pane_id
 fi
 
+# popupHost is a persistent presentation preference; popupActive is only a
+# hint because tmux cannot run cleanup traps after every kind of popup exit.
+# The live nested tmux attachment is verified below before popupActive is used.
 popup_active=false
 recorded_host_window_exists=false
 if $popup_host_valid; then
-  [[ $popup_active_from_state == true ]] && popup_active=true
-  if current_popup_active=$(tmux show-options -qv -t "$session_name" \
-    @agent_popup_active 2>/dev/null); then
-    popup_active=false
-    [[ $current_popup_active == on ]] && popup_active=true
-  fi
-
   context_separator=$'\037'
   if recorded_window_context=$(tmux display-message -p -t "$popup_host_window_id" \
     "#{session_id}${context_separator}#{window_id}" 2>/dev/null); then
@@ -103,6 +98,35 @@ find_hypr_window() {
     # contain spaces (tmux uses "tmux: client").
     parent=$(awk '/^PPid:/ { print $2; exit }' "/proc/$process_pid/status" 2>/dev/null || true)
     [[ $parent =~ ^[0-9]+$ && $parent != "$process_pid" ]] || break
+    process_pid=$parent
+  done
+  return 1
+}
+
+# A managed popup's nested tmux client is launched by the tmux server. Our
+# restored popups additionally have popup-agent.sh as their direct parent.
+# Verify those process relationships instead of trusting the persistent tmux
+# option: an interrupted popup can leave @agent_popup_active set to on.
+tmux_server_pid=$(tmux display-message -p '#{pid}' 2>/dev/null || true)
+is_popup_attachment() {
+  local process_pid=$1 parent argument index depth
+  local -a arguments=()
+  [[ $process_pid =~ ^[0-9]+$ && -r /proc/$process_pid/status ]] || return 1
+  for ((depth = 0; depth < 8; depth++)); do
+    parent=$(awk '/^PPid:/ { print $2; exit }' "/proc/$process_pid/status" 2>/dev/null || true)
+    [[ $parent =~ ^[0-9]+$ && $parent -gt 1 ]] || break
+    [[ $tmux_server_pid =~ ^[0-9]+$ && $parent == "$tmux_server_pid" ]] && return 0
+    if ((depth == 0)) && [[ -r /proc/$parent/cmdline ]]; then
+      while IFS= read -r -d '' argument; do
+        arguments+=("$argument")
+      done < "/proc/$parent/cmdline"
+      for ((index = 0; index + 1 < ${#arguments[@]}; index++)); do
+        if [[ ${arguments[$index]} == */popup-agent.sh &&
+          ${arguments[$((index + 1))]} == "$session_name" ]]; then
+          return 0
+        fi
+      done
+    fi
     process_pid=$parent
   done
   return 1
@@ -170,6 +194,9 @@ open_agent_popup() {
     \; set-option -t "$session_name" @agent_popup_host_pane_id "$host_pane_id"; then
     fail "Could not record popup host for $session_name"
   fi
+  # Only one popup can exist on a tmux client. Close the currently displayed
+  # popup before restoring this agent's popup presentation.
+  tmux display-popup -C -c "$host_client" >/dev/null 2>&1 || true
   tmux set-option -t "$session_name" @agent_popup_active on 2>/dev/null \
     || fail "Could not mark popup active for $session_name"
 
@@ -199,9 +226,15 @@ client_is_popup_host=false
 client_session_id=
 client_window_id=
 client_pane_id=
+popup_attachment_active=false
 while IFS=$'\t' read -r tty pid activity current_session_id current_session current_window current_pane; do
   [[ -n $tty && $pid =~ ^[0-9]+$ ]] || continue
   [[ $activity =~ ^[0-9]+$ ]] || activity=0
+
+  if $popup_host_valid && [[ $current_session == "$session_name" ]] &&
+    is_popup_attachment "$pid"; then
+    popup_attachment_active=true
+  fi
 
   candidate_address=
   candidate_workspace_id=
@@ -242,6 +275,13 @@ while IFS=$'\t' read -r tty pid activity current_session_id current_session curr
   fi
 done < <(tmux list-clients -F $'#{client_tty}\t#{client_pid}\t#{client_activity}\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}' 2>/dev/null || true)
 
+if $popup_attachment_active; then
+  popup_active=true
+elif $popup_host_valid; then
+  # Repair a stale producer hint so the exposed state catches up as well.
+  tmux set-option -u -t "$session_name" @agent_popup_active 2>/dev/null || true
+fi
+
 if [[ -z $client_tty ]]; then
   command -v omarchy-launch-terminal >/dev/null 2>&1 \
     || fail "No desktop tmux client and no terminal launcher found"
@@ -256,6 +296,8 @@ if $popup_host_valid; then
     open_popup=true
   fi
 elif ! $client_is_popup_host; then
+  # A direct presentation must not remain hidden behind another agent's popup.
+  tmux display-popup -C -c "$client_tty" >/dev/null 2>&1 || true
   tmux switch-client -c "$client_tty" -t "$target" 2>/dev/null \
     || fail "Could not switch a tmux client to $session_name"
 fi

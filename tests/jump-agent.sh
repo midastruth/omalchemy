@@ -10,7 +10,15 @@ TMUX_STATE="$TMP_ROOT/tmux-state"
 mkdir -p "$MOCK_BIN"
 : >"$COMMAND_LOG"
 : >"$TMUX_STATE"
-trap 'rm -rf "$TMP_ROOT"' EXIT
+active_popup_wrapper_pid=
+cleanup() {
+  if [[ ${active_popup_wrapper_pid:-} =~ ^[0-9]+$ ]]; then
+    kill "$active_popup_wrapper_pid" 2>/dev/null || true
+    wait "$active_popup_wrapper_pid" 2>/dev/null || true
+  fi
+  rm -rf "$TMP_ROOT"
+}
+trap cleanup EXIT
 
 cat >"$MOCK_BIN/tmux" <<'MOCK'
 #!/usr/bin/env bash
@@ -75,12 +83,18 @@ list-clients)
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "${TMUX_MOCK_CLIENT_TTY:-/dev/pts/1}" "$TEST_CLIENT_PID" '100' \
     "$client_session_id" 'work' "$client_window_id" "$client_pane_id"
+  if [[ ${TMUX_MOCK_POPUP_CLIENT_PID:-} =~ ^[0-9]+$ ]]; then
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      '/dev/pts/8' "$TMUX_MOCK_POPUP_CLIENT_PID" '101' '$1' \
+      'agent-pi-project-1' '@9' '%46'
+  fi
   ;;
 switch-client)
   [[ " $* " == *' -t @38 '* ]] && printf 'restored\n' >"$TMUX_STATE"
   exit 0
   ;;
 display-popup)
+  [[ " $* " == *' -C '* ]] && exit 0
   if [[ -n ${TMUX_MOCK_POPUP_STARTED:-} ]]; then
     : >"$TMUX_MOCK_POPUP_STARTED"
     while [[ ! -e ${TMUX_MOCK_POPUP_RELEASE:-} ]]; do
@@ -143,6 +157,32 @@ assert_not_contains() {
   if grep -Fq "$needle" "$COMMAND_LOG"; then fail "$name"; else pass "$name"; fi
 }
 
+live_popup_dir="$TMP_ROOT/live-popup"
+live_popup_pid_file="$live_popup_dir/client.pid"
+mkdir -p "$live_popup_dir"
+cat >"$live_popup_dir/popup-agent.sh" <<'MOCK'
+#!/usr/bin/env bash
+child=
+cleanup_popup() {
+  [[ ${child:-} =~ ^[0-9]+$ ]] && kill "$child" 2>/dev/null || true
+  exit 0
+}
+trap cleanup_popup HUP INT TERM
+sleep 300 &
+child=$!
+printf '%s\n' "$child" >"$2"
+wait "$child"
+MOCK
+chmod +x "$live_popup_dir/popup-agent.sh"
+bash "$live_popup_dir/popup-agent.sh" 'agent-pi-project-1' "$live_popup_pid_file" &
+active_popup_wrapper_pid=$!
+for _ in $(seq 1 50); do
+  [[ -s $live_popup_pid_file ]] && break
+  sleep 0.02
+done
+export TMUX_MOCK_POPUP_CLIENT_PID
+TMUX_MOCK_POPUP_CLIENT_PID=$(<"$live_popup_pid_file")
+
 : >"$COMMAND_LOG"
 export TMUX_MOCK_POPUP_ACTIVE=on
 bash "$ROOT/jump-agent.sh" '%46' 'agent-pi-project-1' 0 0 \
@@ -156,6 +196,23 @@ assert_contains \
 assert_not_contains \
   'jump-agent does not open a duplicate for an active popup' \
   $'tmux\tdisplay-popup'
+
+kill "$active_popup_wrapper_pid"
+wait "$active_popup_wrapper_pid" 2>/dev/null || true
+active_popup_wrapper_pid=
+unset TMUX_MOCK_POPUP_CLIENT_PID
+: >"$COMMAND_LOG"
+bash "$ROOT/jump-agent.sh" '%46' 'agent-pi-project-1' 0 0 \
+  '/dev/pts/1' '$0' '@38' '%41' true
+assert_contains \
+  'jump-agent ignores and repairs a stale popup-active hint' \
+  $'tmux\tset-option\t-u\t-t\tagent-pi-project-1\t@agent_popup_active'
+assert_contains \
+  'jump-agent restores a background popup even when its active hint is stale' \
+  $'tmux\tdisplay-popup\t-c\t/dev/pts/1\t-w\t90%\t-h\t90%\t-E\t'
+assert_contains \
+  'jump-agent closes another popup on the host before restoring the selected one' \
+  $'tmux\tdisplay-popup\t-C\t-c\t/dev/pts/1'
 unset TMUX_MOCK_POPUP_ACTIVE
 
 : >"$COMMAND_LOG"
@@ -167,6 +224,9 @@ assert_not_contains \
 assert_contains \
   'jump-agent reopens a background agent in a popup' \
   $'tmux\tdisplay-popup\t-c\t/dev/pts/1\t-w\t90%\t-h\t90%\t-E\t'
+assert_contains \
+  'jump-agent clears the host popup before reopening a background popup' \
+  $'tmux\tdisplay-popup\t-C\t-c\t/dev/pts/1'
 assert_contains \
   'jump-agent marks a reopened popup active' \
   $'tmux\tset-option\t-t\tagent-pi-project-1\t@agent_popup_active\ton'
@@ -256,6 +316,9 @@ env -u TMUX bash "$ROOT/jump-agent.sh" '%46' 'agent-pi-project-1' 0 0
 assert_contains \
   'jump-agent retains direct-pane behavior for agents without a popup preference' \
   $'tmux\tswitch-client\t-c\t/dev/pts/1\t-t\t%46'
+assert_contains \
+  'jump-agent closes an existing popup before directly displaying an agent' \
+  $'tmux\tdisplay-popup\t-C\t-c\t/dev/pts/1'
 assert_contains \
   'jump-agent derives the tmux server identity when reporting Seen from Quickshell' \
   $'daemon\tTMUX=/tmp/tmux-test,123,0\tsend\t{"type":"Seen","pane_id":"%46"}'
