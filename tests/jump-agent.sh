@@ -4,6 +4,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_ROOT="${TMPDIR:-/tmp}/omalchemy-jump-tests.$$"
 MOCK_BIN="$TMP_ROOT/bin"
+MOCK_DAEMON="$MOCK_BIN/tmux-argos-daemon"
 COMMAND_LOG="$TMP_ROOT/commands.log"
 TMUX_STATE="$TMP_ROOT/tmux-state"
 mkdir -p "$MOCK_BIN"
@@ -32,7 +33,9 @@ display-message)
     [[ $previous == -c ]] && client=$argument
     previous=$argument
   done
-  if [[ $format == *'#{session_id}'* && $format == *'#{window_id}'* ]]; then
+  if [[ $format == '#{socket_path},#{pid},0' ]]; then
+    printf '%s' '/tmp/tmux-test,123,0'
+  elif [[ $format == *'#{session_id}'* && $format == *'#{window_id}'* ]]; then
     separator=$'\037'
     if [[ $target == @38 ]]; then
       [[ -n ${TMUX_MOCK_HOST_WINDOW_MISSING:-} ]] && exit 1
@@ -53,6 +56,8 @@ show-option|show-options)
   option=${*: -1}
   if [[ $option == @agent_popup_active ]]; then
     printf '%s' "${TMUX_MOCK_POPUP_ACTIVE:-}"
+  elif [[ $option == @agent_daemon_binary ]]; then
+    printf '%s' "$MOCK_DAEMON"
   fi
   exit 0
   ;;
@@ -108,9 +113,16 @@ cat >"$MOCK_BIN/notify-send" <<'MOCK'
 exit 0
 MOCK
 
+cat >"$MOCK_DAEMON" <<'MOCK'
+#!/usr/bin/env bash
+printf 'daemon\tTMUX=%s' "${TMUX-}" >>"$COMMAND_LOG"
+printf '\t%s' "$@" >>"$COMMAND_LOG"
+printf '\n' >>"$COMMAND_LOG"
+MOCK
+
 chmod +x "$MOCK_BIN"/*
 export PATH="$MOCK_BIN:$PATH"
-export COMMAND_LOG TMUX_STATE TEST_CLIENT_PID=$$
+export COMMAND_LOG TMUX_STATE MOCK_DAEMON TEST_CLIENT_PID=$$
 
 pass_count=0
 fail_count=0
@@ -240,10 +252,13 @@ unset TMUX_MOCK_CLIENT_TTY TMUX_MOCK_CLIENT_SESSION_ID \
   TMUX_MOCK_HOST_WINDOW_MISSING
 
 : >"$COMMAND_LOG"
-bash "$ROOT/jump-agent.sh" '%46' 'agent-pi-project-1' 0 0
+env -u TMUX bash "$ROOT/jump-agent.sh" '%46' 'agent-pi-project-1' 0 0
 assert_contains \
   'jump-agent retains direct-pane behavior for agents without a popup preference' \
   $'tmux\tswitch-client\t-c\t/dev/pts/1\t-t\t%46'
+assert_contains \
+  'jump-agent derives the tmux server identity when reporting Seen from Quickshell' \
+  $'daemon\tTMUX=/tmp/tmux-test,123,0\tsend\t{"type":"Seen","pane_id":"%46"}'
 
 : >"$COMMAND_LOG"
 export TMUX_MOCK_NO_CLIENTS=1

@@ -119,14 +119,23 @@ target_pane_id=$(tmux display-message -p -t "$target" '#{pane_id}' 2>/dev/null |
 # daemon that a successfully opened done pane has been viewed, so its
 # authoritative state changes to idle just like opening it through the picker.
 mark_target_pane_seen() {
-  local daemon_binary request
+  local daemon_binary daemon_tmux request
   [[ $target_pane_id =~ ^%[0-9]+$ ]] || return 0
 
   daemon_binary=$(tmux show-option -gqv @agent_daemon_binary 2>/dev/null || true)
   [[ -x $daemon_binary ]] || return 0
 
+  # Quickshell is normally started outside tmux, so its child processes have no
+  # TMUX variable. The daemon uses that variable to select its per-server Unix
+  # socket; derive the same server identity from tmux before sending Seen.
+  daemon_tmux=${TMUX-}
+  if [[ -z $daemon_tmux ]]; then
+    daemon_tmux=$(tmux display-message -p '#{socket_path},#{pid},0' 2>/dev/null || true)
+  fi
+  [[ $daemon_tmux == *,*,* ]] || return 0
+
   printf -v request '{"type":"Seen","pane_id":"%s"}' "$target_pane_id"
-  "$daemon_binary" send "$request" >/dev/null 2>&1 || true
+  TMUX=$daemon_tmux "$daemon_binary" send "$request" >/dev/null 2>&1 || true
 }
 
 refresh_client_context() {
