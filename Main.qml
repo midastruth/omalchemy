@@ -262,7 +262,9 @@ Item {
         onExited: root.runNextNotification()
     }
 
-    onConfiguredSocketChanged: {
+    // The host injects settings after creation. Wait for the derived path:
+    // configuredSocket can change before sourcePath has been recomputed.
+    onSourcePathChanged: {
         if (ready)
             resetSourceReader();
     }
