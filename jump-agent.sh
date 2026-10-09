@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-pane_id=${1-}
-session_name=${2-}
-window_index=${3-0}
-pane_index=${4-0}
-popup_host_client=${5-}
-popup_host_session_id=${6-}
-popup_host_window_id=${7-}
-popup_host_pane_id=${8-}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || exit 1
+# shellcheck source=server.sh
+. "$SCRIPT_DIR/server.sh"
+selected_socket=${1-}
+expected_server_pid=${2-}
+pane_id=${3-}
+session_id=${4-}
+session_name=${5-}
+popup_host_client=${6-}
+popup_host_session_id=${7-}
+popup_host_window_id=${8-}
+popup_host_pane_id=${9-}
 
 popup_host_valid=false
 if [[ -n $popup_host_client && $popup_host_session_id =~ ^\$[0-9]+$ &&
@@ -25,14 +28,18 @@ fail() {
 }
 
 command -v tmux >/dev/null 2>&1 || fail "tmux is not installed"
-[[ -n $session_name ]] || fail "The state row has no tmux session"
-tmux has-session -t "$session_name" 2>/dev/null || fail "tmux session no longer exists: $session_name"
-
-target="${session_name}:${window_index}.${pane_index}"
-if [[ -n $pane_id ]]; then
-  pane_session=$(tmux display-message -p -t "$pane_id" '#{session_name}' 2>/dev/null || true)
-  [[ $pane_session == "$session_name" ]] && target=$pane_id
+if ! bind_tmux_server "$selected_socket" "$expected_server_pid"; then
+  exit 1
 fi
+[[ $pane_id =~ ^%[0-9]+$ && $session_id =~ ^\$[0-9]+$ ]] \
+  || fail "The state row has no immutable pane/session identity"
+tmux_server has-session -t "$session_id" 2>/dev/null || fail "tmux session no longer exists: $session_name"
+if ! pane_context=$(tmux_server display-message -p -t "$pane_id" $'#{session_id}\037#{session_name}' 2>/dev/null); then
+  fail "tmux pane no longer exists: $pane_id"
+fi
+IFS=$'\037' read -r pane_session_id session_name <<< "$pane_context"
+[[ $pane_session_id == "$session_id" ]] || fail "tmux pane moved to another session; refresh first"
+target=$pane_id
 
 # popupHost is a persistent presentation preference; popupActive is only a
 # hint because tmux cannot run cleanup traps after every kind of popup exit.
@@ -41,7 +48,7 @@ popup_active=false
 recorded_host_window_exists=false
 if $popup_host_valid; then
   context_separator=$'\037'
-  if recorded_window_context=$(tmux display-message -p -t "$popup_host_window_id" \
+  if recorded_window_context=$(tmux_server display-message -p -t "$popup_host_window_id" \
     "#{session_id}${context_separator}#{window_id}" 2>/dev/null); then
     IFS="$context_separator" read -r recorded_session_id recorded_window_id \
       <<< "$recorded_window_context"
@@ -107,7 +114,7 @@ find_hypr_window() {
 # restored popups additionally have popup-agent.sh as their direct parent.
 # Verify those process relationships instead of trusting the persistent tmux
 # option: an interrupted popup can leave @agent_popup_active set to on.
-tmux_server_pid=$(tmux display-message -p '#{pid}' 2>/dev/null || true)
+tmux_server_pid=$server_pid
 is_popup_attachment() {
   local process_pid=$1 parent argument index depth
   local -a arguments=()
@@ -120,9 +127,11 @@ is_popup_attachment() {
       while IFS= read -r -d '' argument; do
         arguments+=("$argument")
       done < "/proc/$parent/cmdline"
-      for ((index = 0; index + 1 < ${#arguments[@]}; index++)); do
+      for ((index = 0; index + 3 < ${#arguments[@]}; index++)); do
         if [[ ${arguments[$index]} == */popup-agent.sh &&
-          ${arguments[$((index + 1))]} == "$session_name" ]]; then
+          ${arguments[$((index + 1))]} == "$server_socket" &&
+          ${arguments[$((index + 2))]} == "$server_pid" &&
+          ${arguments[$((index + 3))]} == "$session_id" ]]; then
           return 0
         fi
       done
@@ -137,41 +146,28 @@ is_popup_attachment() {
 # the popup. Without a live popup host, prefer a client already displaying the
 # target pane, then one in the target session, then another graphical client.
 # Headless clients are only eligible outside Hyprland.
-target_pane_id=$(tmux display-message -p -t "$target" '#{pane_id}' 2>/dev/null || true)
+target_pane_id=$pane_id
 
 # A direct tmux switch does not emit tmux-argos' Seen event. Tell the configured
 # daemon that a successfully opened done pane has been viewed, so its
 # authoritative state changes to idle just like opening it through the picker.
 mark_target_pane_seen() {
-  local daemon_binary daemon_tmux request
-  [[ $target_pane_id =~ ^%[0-9]+$ ]] || return 0
-
-  daemon_binary=$(tmux show-option -gqv @agent_daemon_binary 2>/dev/null || true)
-  [[ -x $daemon_binary ]] || return 0
-
-  # Quickshell is normally started outside tmux, so its child processes have no
-  # TMUX variable. The daemon uses that variable to select its per-server Unix
-  # socket; derive the same server identity from tmux before sending Seen.
-  daemon_tmux=${TMUX-}
-  if [[ -z $daemon_tmux ]]; then
-    daemon_tmux=$(tmux display-message -p '#{socket_path},#{pid},0' 2>/dev/null || true)
+  if ! bash "$SCRIPT_DIR/seen-agent.sh" "$server_socket" "$server_pid" "$target_pane_id"; then
+    return 1
   fi
-  [[ $daemon_tmux == *,*,* ]] || return 0
-
-  printf -v request '{"type":"Seen","pane_id":"%s"}' "$target_pane_id"
-  TMUX=$daemon_tmux "$daemon_binary" send "$request" >/dev/null 2>&1 || true
+  return 0
 }
 
 refresh_client_context() {
-  local wanted_client="$1" rows tty _pid _activity session_id _session window pane
-  rows=$(tmux list-clients -F \
+  local wanted_client="$1" rows tty _pid _activity host_session_id _session window pane
+  rows=$(tmux_server list-clients -F \
     $'#{client_tty}\t#{client_pid}\t#{client_activity}\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}' \
     2>/dev/null) || return 1
-  while IFS=$'\t' read -r tty _pid _activity session_id _session window pane; do
+  while IFS=$'\t' read -r tty _pid _activity host_session_id _session window pane; do
     [[ $tty == "$wanted_client" ]] || continue
-    [[ $session_id =~ ^\$[0-9]+$ && $window =~ ^@[0-9]+$ && $pane =~ ^%[0-9]+$ ]] \
+    [[ $host_session_id =~ ^\$[0-9]+$ && $window =~ ^@[0-9]+$ && $pane =~ ^%[0-9]+$ ]] \
       || return 1
-    client_session_id=$session_id
+    client_session_id=$host_session_id
     client_window_id=$window
     client_pane_id=$pane
     return 0
@@ -181,35 +177,33 @@ refresh_client_context() {
 
 open_agent_popup() {
   local host_client="$1" host_session_id="$2" host_window_id="$3" host_pane_id="$4"
-  local popup_width popup_height popup_script_q session_q popup_command
+  local popup_width popup_height popup_command
   local display_popup_pid
-  popup_width=$(tmux show-option -gqv @agent_popup_width 2>/dev/null || true)
-  popup_height=$(tmux show-option -gqv @agent_popup_height 2>/dev/null || true)
+  popup_width=$(tmux_server show-option -gqv @agent_popup_width 2>/dev/null) || fail "Could not read popup width"
+  popup_height=$(tmux_server show-option -gqv @agent_popup_height 2>/dev/null) || fail "Could not read popup height"
   [[ -n $popup_width ]] || popup_width=90%
   [[ -n $popup_height ]] || popup_height=90%
 
-  if ! tmux set-option -t "$session_name" @agent_popup_host_client "$host_client" \
-    \; set-option -t "$session_name" @agent_popup_host_session_id "$host_session_id" \
-    \; set-option -t "$session_name" @agent_popup_host_window_id "$host_window_id" \
-    \; set-option -t "$session_name" @agent_popup_host_pane_id "$host_pane_id"; then
+  if ! tmux_server set-option -t "$session_id" @agent_popup_host_client "$host_client" \
+    \; set-option -t "$session_id" @agent_popup_host_session_id "$host_session_id" \
+    \; set-option -t "$session_id" @agent_popup_host_window_id "$host_window_id" \
+    \; set-option -t "$session_id" @agent_popup_host_pane_id "$host_pane_id"; then
     fail "Could not record popup host for $session_name"
   fi
   # Only one popup can exist on a tmux client. Close the currently displayed
   # popup before restoring this agent's popup presentation.
-  tmux display-popup -C -c "$host_client" >/dev/null 2>&1 || true
-  tmux set-option -t "$session_name" @agent_popup_active on 2>/dev/null \
+  tmux_server display-popup -C -c "$host_client" >/dev/null 2>&1 || fail "Could not close host popup"
+  tmux_server set-option -t "$session_id" @agent_popup_active on 2>/dev/null \
     || fail "Could not mark popup active for $session_name"
 
-  popup_script_q=$(printf '%q' "$SCRIPT_DIR/popup-agent.sh")
-  session_q=$(printf '%q' "$session_name")
-  popup_command="$popup_script_q $session_q"
-  tmux display-popup -c "$host_client" -w "$popup_width" -h "$popup_height" \
+  printf -v popup_command '%q %q %q %q' "$SCRIPT_DIR/popup-agent.sh" "$server_socket" "$server_pid" "$session_id"
+  tmux_server display-popup -c "$host_client" -w "$popup_width" -h "$popup_height" \
     -E "$popup_command" </dev/null >/dev/null 2>&1 &
   display_popup_pid=$!
   sleep 0.05
   if ! kill -0 "$display_popup_pid" 2>/dev/null; then
     if ! wait "$display_popup_pid"; then
-      tmux set-option -u -t "$session_name" @agent_popup_active 2>/dev/null || true
+      tmux_server set-option -u -t "$session_id" @agent_popup_active 2>/dev/null || true
       fail "Could not open popup for $session_name"
     fi
   fi
@@ -273,20 +267,19 @@ while IFS=$'\t' read -r tty pid activity current_session_id current_session curr
     client_window_id=$current_window
     client_pane_id=$current_pane
   fi
-done < <(tmux list-clients -F $'#{client_tty}\t#{client_pid}\t#{client_activity}\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}' 2>/dev/null || true)
+done < <(tmux_server list-clients -F $'#{client_tty}\t#{client_pid}\t#{client_activity}\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}' 2>/dev/null || true)
 
 if $popup_attachment_active; then
   popup_active=true
 elif $popup_host_valid; then
   # Repair a stale producer hint so the exposed state catches up as well.
-  tmux set-option -u -t "$session_name" @agent_popup_active 2>/dev/null || true
+  tmux_server set-option -u -t "$session_id" @agent_popup_active 2>/dev/null || true
 fi
 
 if [[ -z $client_tty ]]; then
   command -v omarchy-launch-terminal >/dev/null 2>&1 \
     || fail "No desktop tmux client and no terminal launcher found"
-  omarchy-launch-terminal tmux attach-session -t "$target" >/dev/null 2>&1 &
-  mark_target_pane_seen
+  omarchy-launch-terminal bash "$SCRIPT_DIR/attach-agent.sh" "$server_socket" "$server_pid" "$pane_id" "$session_id" >/dev/null 2>&1 &
   exit 0
 fi
 
@@ -297,20 +290,19 @@ if $popup_host_valid; then
   fi
 elif ! $client_is_popup_host; then
   # A direct presentation must not remain hidden behind another agent's popup.
-  tmux display-popup -C -c "$client_tty" >/dev/null 2>&1 || true
-  tmux switch-client -c "$client_tty" -t "$target" 2>/dev/null \
+  tmux_server display-popup -C -c "$client_tty" >/dev/null 2>&1 || fail "Could not close client popup"
+  tmux_server switch-client -c "$client_tty" -t "$target" 2>/dev/null \
     || fail "Could not switch a tmux client to $session_name"
 fi
 
 if $open_popup && $recorded_host_window_exists &&
   [[ $client_session_id != "$popup_host_session_id" ||
     $client_window_id != "$popup_host_window_id" ]]; then
-  tmux switch-client -c "$client_tty" -t "$popup_host_window_id" 2>/dev/null \
+  tmux_server switch-client -c "$client_tty" -t "$popup_host_window_id" 2>/dev/null \
     || fail "Could not restore popup host window $popup_host_window_id"
   refresh_client_context "$client_tty" \
     || fail "Could not read restored popup host context"
 fi
-mark_target_pane_seen
 
 if $hypr_available && [[ -n $client_address ]]; then
   # Hyprland 0.56 dispatches Lua actions. Try that API first, while keeping
@@ -342,4 +334,7 @@ fi
 
 if $open_popup; then
   open_agent_popup "$client_tty" "$client_session_id" "$client_window_id" "$client_pane_id"
+fi
+if ! mark_target_pane_seen; then
+  fail "Pane opened, but Seen could not be sent to its server"
 fi

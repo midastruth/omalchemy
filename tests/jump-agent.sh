@@ -22,6 +22,16 @@ trap cleanup EXIT
 
 cat >"$MOCK_BIN/tmux" <<'MOCK'
 #!/usr/bin/env bash
+if [[ ${1:-} != -S || ${2:-} != /tmp/tmux-test ]]; then
+  printf 'unbound tmux command\n' >&2
+  exit 1
+fi
+shift 2
+if [[ ${1:-} == if-shell ]]; then
+  [[ ${2:-} == -F && ${3:-} == '#{==:#{pid},123}' ]] || exit 1
+  mapfile -d '' -t queued_arguments < <(python3 -c 'import shlex,sys; sys.stdout.write("\0".join(shlex.split(sys.argv[1]))+"\0")' "$4")
+  set -- "${queued_arguments[@]}"
+fi
 printf 'tmux' >>"$COMMAND_LOG"
 printf '\t%s' "$@" >>"$COMMAND_LOG"
 printf '\n' >>"$COMMAND_LOG"
@@ -43,6 +53,10 @@ display-message)
   done
   if [[ $format == '#{socket_path},#{pid},0' ]]; then
     printf '%s' '/tmp/tmux-test,123,0'
+  elif [[ $format == '#{pid}' ]]; then
+    printf '%s' '123'
+  elif [[ $format == $'#{session_id}\037#{session_name}' ]]; then
+    printf '%s\037%s' '$1' 'agent-pi-project-1'
   elif [[ $format == *'#{session_id}'* && $format == *'#{window_id}'* ]]; then
     separator=$'\037'
     if [[ $target == @38 ]]; then
@@ -170,11 +184,11 @@ cleanup_popup() {
 trap cleanup_popup HUP INT TERM
 sleep 300 &
 child=$!
-printf '%s\n' "$child" >"$2"
+printf '%s\n' "$child" >"$4"
 wait "$child"
 MOCK
 chmod +x "$live_popup_dir/popup-agent.sh"
-bash "$live_popup_dir/popup-agent.sh" 'agent-pi-project-1' "$live_popup_pid_file" &
+bash "$live_popup_dir/popup-agent.sh" '/tmp/tmux-test' 123 '$1' "$live_popup_pid_file" &
 active_popup_wrapper_pid=$!
 for _ in $(seq 1 50); do
   [[ -s $live_popup_pid_file ]] && break
@@ -185,7 +199,7 @@ TMUX_MOCK_POPUP_CLIENT_PID=$(<"$live_popup_pid_file")
 
 : >"$COMMAND_LOG"
 export TMUX_MOCK_POPUP_ACTIVE=on
-bash "$ROOT/jump-agent.sh" '%46' 'agent-pi-project-1' 0 0 \
+bash "$ROOT/jump-agent.sh" '/tmp/tmux-test' 123 '%46' '$1' 'agent-pi-project-1' \
   '/dev/pts/1' '$0' '@38' '%41' true
 assert_not_contains \
   'jump-agent focuses an existing popup host without switching the outer tmux client' \
@@ -202,11 +216,11 @@ wait "$active_popup_wrapper_pid" 2>/dev/null || true
 active_popup_wrapper_pid=
 unset TMUX_MOCK_POPUP_CLIENT_PID
 : >"$COMMAND_LOG"
-bash "$ROOT/jump-agent.sh" '%46' 'agent-pi-project-1' 0 0 \
+bash "$ROOT/jump-agent.sh" '/tmp/tmux-test' 123 '%46' '$1' 'agent-pi-project-1' \
   '/dev/pts/1' '$0' '@38' '%41' true
 assert_contains \
   'jump-agent ignores and repairs a stale popup-active hint' \
-  $'tmux\tset-option\t-u\t-t\tagent-pi-project-1\t@agent_popup_active'
+  $'tmux\tset-option\t-u\t-t\t$1\t@agent_popup_active'
 assert_contains \
   'jump-agent restores a background popup even when its active hint is stale' \
   $'tmux\tdisplay-popup\t-c\t/dev/pts/1\t-w\t90%\t-h\t90%\t-E\t'
@@ -216,7 +230,7 @@ assert_contains \
 unset TMUX_MOCK_POPUP_ACTIVE
 
 : >"$COMMAND_LOG"
-bash "$ROOT/jump-agent.sh" '%46' 'agent-pi-project-1' 0 0 \
+bash "$ROOT/jump-agent.sh" '/tmp/tmux-test' 123 '%46' '$1' 'agent-pi-project-1' \
   '/dev/pts/1' '$0' '@38' '%41' false
 assert_not_contains \
   'jump-agent reopens a background popup without switching the outer tmux client' \
@@ -229,7 +243,7 @@ assert_contains \
   $'tmux\tdisplay-popup\t-C\t-c\t/dev/pts/1'
 assert_contains \
   'jump-agent marks a reopened popup active' \
-  $'tmux\tset-option\t-t\tagent-pi-project-1\t@agent_popup_active\ton'
+  $'tmux\tset-option\t-t\t$1\t@agent_popup_active\ton'
 assert_contains \
   'jump-agent delegates popup lifecycle cleanup to the popup command' \
   'popup-agent.sh'
@@ -240,7 +254,7 @@ popup_release="$TMP_ROOT/popup-release"
 rm -f "$popup_started" "$popup_release"
 export TMUX_MOCK_POPUP_STARTED="$popup_started"
 export TMUX_MOCK_POPUP_RELEASE="$popup_release"
-bash "$ROOT/jump-agent.sh" '%46' 'agent-pi-project-1' 0 0 \
+bash "$ROOT/jump-agent.sh" '/tmp/tmux-test' 123 '%46' '$1' 'agent-pi-project-1' \
   '/dev/pts/1' '$0' '@38' '%41' false &
 nonblocking_jump_pid=$!
 for _ in $(seq 1 50); do
@@ -259,17 +273,17 @@ wait "$nonblocking_jump_pid" 2>/dev/null || true
 unset TMUX_MOCK_POPUP_STARTED TMUX_MOCK_POPUP_RELEASE
 
 : >"$COMMAND_LOG"
-bash "$ROOT/popup-agent.sh" 'agent-pi-project-1'
+bash "$ROOT/popup-agent.sh" '/tmp/tmux-test' 123 '$1'
 assert_contains \
   'popup command marks a popup inactive again after it closes' \
-  $'tmux\tset-option\t-u\t-t\tagent-pi-project-1\t@agent_popup_active'
+  $'tmux\tset-option\t-u\t-t\t$1\t@agent_popup_active'
 
 : >"$COMMAND_LOG"
 : >"$TMUX_STATE"
-export TMUX_MOCK_CLIENT_SESSION_ID='$5'
+export TMUX_MOCK_CLIENT_SESSION_ID=\$5
 export TMUX_MOCK_CLIENT_WINDOW_ID=@50
 export TMUX_MOCK_CLIENT_PANE_ID=%51
-bash "$ROOT/jump-agent.sh" '%46' 'agent-pi-project-1' 0 0 \
+bash "$ROOT/jump-agent.sh" '/tmp/tmux-test' 123 '%46' '$1' 'agent-pi-project-1' \
   '/dev/pts/1' '$0' '@38' '%41' false
 assert_contains \
   'jump-agent restores a moved popup host client to its recorded window before reopening' \
@@ -279,12 +293,12 @@ assert_contains \
   $'tmux\tdisplay-popup\t-c\t/dev/pts/1'
 assert_contains \
   'jump-agent records the restored work context instead of the invoking pane' \
-  $'@agent_popup_host_session_id\t$0\t;\tset-option\t-t\tagent-pi-project-1\t@agent_popup_host_window_id\t@38\t;\tset-option\t-t\tagent-pi-project-1\t@agent_popup_host_pane_id\t%41'
+  $'@agent_popup_host_session_id\t$0\t;\tset-option\t-t\t$1\t@agent_popup_host_window_id\t@38\t;\tset-option\t-t\t$1\t@agent_popup_host_pane_id\t%41'
 
 : >"$COMMAND_LOG"
 : >"$TMUX_STATE"
 export TMUX_MOCK_CLIENT_TTY=/dev/pts/9
-bash "$ROOT/jump-agent.sh" '%46' 'agent-pi-project-1' 0 0 \
+bash "$ROOT/jump-agent.sh" '/tmp/tmux-test' 123 '%46' '$1' 'agent-pi-project-1' \
   '/dev/pts/missing' '$0' '@38' '%41' false
 assert_contains \
   'jump-agent uses another graphical client when the original host client disappeared' \
@@ -299,7 +313,7 @@ assert_not_contains \
 : >"$COMMAND_LOG"
 : >"$TMUX_STATE"
 export TMUX_MOCK_HOST_WINDOW_MISSING=1
-bash "$ROOT/jump-agent.sh" '%46' 'agent-pi-project-1' 0 0 \
+bash "$ROOT/jump-agent.sh" '/tmp/tmux-test' 123 '%46' '$1' 'agent-pi-project-1' \
   '/dev/pts/missing' '$0' '@38' '%41' false
 assert_not_contains \
   'jump-agent falls back only when the recorded work window no longer exists' \
@@ -312,7 +326,7 @@ unset TMUX_MOCK_CLIENT_TTY TMUX_MOCK_CLIENT_SESSION_ID \
   TMUX_MOCK_HOST_WINDOW_MISSING
 
 : >"$COMMAND_LOG"
-env -u TMUX bash "$ROOT/jump-agent.sh" '%46' 'agent-pi-project-1' 0 0
+env -u TMUX bash "$ROOT/jump-agent.sh" '/tmp/tmux-test' 123 '%46' \$1 'agent-pi-project-1'
 assert_contains \
   'jump-agent retains direct-pane behavior for agents without a popup preference' \
   $'tmux\tswitch-client\t-c\t/dev/pts/1\t-t\t%46'
@@ -320,15 +334,21 @@ assert_contains \
   'jump-agent closes an existing popup before directly displaying an agent' \
   $'tmux\tdisplay-popup\t-C\t-c\t/dev/pts/1'
 assert_contains \
-  'jump-agent derives the tmux server identity when reporting Seen from Quickshell' \
+  'jump-agent uses the row server identity when reporting Seen from Quickshell' \
   $'daemon\tTMUX=/tmp/tmux-test,123,0\tsend\t{"type":"Seen","pane_id":"%46"}'
 
 : >"$COMMAND_LOG"
 export TMUX_MOCK_NO_CLIENTS=1
-bash "$ROOT/jump-agent.sh" '%46' 'agent-pi-project-1' 0 0
+bash "$ROOT/jump-agent.sh" '/tmp/tmux-test' 123 '%46' '$1' 'agent-pi-project-1'
+for _ in $(seq 1 50); do
+  if grep -Fq 'attach-agent.sh' "$COMMAND_LOG"; then
+    break
+  fi
+  sleep 0.02
+done
 assert_contains \
   'jump-agent retains detached-session terminal launch behavior' \
-  $'omarchy-launch-terminal\ttmux\tattach-session\t-t\t%46'
+  $'omarchy-launch-terminal\tbash\t'"$ROOT"$'/attach-agent.sh\t/tmp/tmux-test\t123\t%46\t$1'
 
 printf '%s passed, %s failed\n' "$pass_count" "$fail_count"
 [[ $fail_count -eq 0 ]]

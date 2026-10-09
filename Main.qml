@@ -1,22 +1,26 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import Quickshell.Io
 import "Model.js" as Model
 
-// Display-only adapter for tmux-argos. It never inspects panes or infers a
-// state: every row and count comes directly from the normalized JSON file.
+// Display is file-driven. Only explicit row operations invoke tmux.
 Item {
     id: root
     visible: false
 
     property var settings: ({})
     readonly property string home: Quickshell.env("HOME") || ""
-    readonly property string configuredPath: String(setting("stateFile", "~/.cache/tmux-argos/state.json"))
-    readonly property string statePath: expandPath(configuredPath)
+    readonly property string configuredSocket: expandPath(String(setting("tmuxSocket", "")))
+    readonly property string sourcePath: configuredSocket.charAt(0) === "/" ? home + "/.cache/tmux-argos/sources/" + Model.socketHash(configuredSocket) + ".json" : ""
     readonly property int pollIntervalMs: Math.max(1000, Number(setting("pollIntervalMs", 2000)) || 2000)
     readonly property bool showCount: setting("showCount", true) !== false
     readonly property bool notificationsEnabled: setting("notifications", true) !== false
 
+    property var source: null
+    property FileView sourceFile: null
+    property FileView stateReader: null
+    property bool ready: false
     property var agents: []
     property var previousStates: ({})
     property bool initialized: false
@@ -29,7 +33,7 @@ Item {
     readonly property var counts: status.counts
     readonly property string dominantState: status.state
     readonly property int dominantCount: status.count
-    readonly property string tooltipText: Model.tooltip(agents)
+    readonly property string tooltipText: errorText !== "" ? errorText : Model.tooltip(agents)
 
     function setting(name, fallback) {
         var value = settings ? settings[name] : undefined;
@@ -53,42 +57,114 @@ Item {
             value = value.substring(7);
         try {
             return decodeURIComponent(value);
-        } catch (e) {
+        } catch (error) {
             return value;
         }
     }
 
-    function refresh() {
-        stateFile.reload();
+    function clearAgents() {
+        agents = [];
+        previousStates = ({});
+        notificationQueue = [];
+        initialized = false;
+        generatedAt = 0;
+        dataSignature = "";
+        revision++;
     }
 
-    function applyDocument(content) {
+    function discardStateReader() {
+        if (stateReader) {
+            stateReader.destroy();
+            stateReader = null;
+        }
+    }
+
+    function invalidateSource(message) {
+        discardStateReader();
+        source = null;
+        clearAgents();
+        errorText = message;
+    }
+
+    function resetSourceReader() {
+        if (sourceFile) {
+            sourceFile.destroy();
+            sourceFile = null;
+        }
+        invalidateSource("Configure an absolute tmuxSocket to select a server");
+        if (sourcePath !== "") {
+            errorText = "Loading Argos source…";
+            sourceFile = sourceReaderComponent.createObject(root, {
+                path: sourcePath,
+                requestedSocket: configuredSocket
+            });
+        }
+    }
+
+    function refresh() {
+        if (sourceFile)
+            sourceFile.reload();
+        if (stateReader)
+            stateReader.reload();
+    }
+
+    function applySource(content, requestedSocket) {
+        if (requestedSocket !== configuredSocket)
+            return;
+        var next;
+        try {
+            next = JSON.parse(String(content || ""));
+            if (!Model.sameServer(next, next) || next.serverSocket !== configuredSocket ||
+                !(next.stateFile === null || (typeof next.stateFile === "string" && next.stateFile.charAt(0) === "/")))
+                throw new Error("invalid source identity or state path");
+        } catch (error) {
+            invalidateSource("Invalid Argos source: " + error);
+            return;
+        }
+
+        if (!Model.sameServer(source, next) || source.stateFile !== next.stateFile) {
+            discardStateReader();
+            clearAgents();
+            source = next;
+            if (next.stateFile !== null) {
+                errorText = "Loading Argos state…";
+                // createObject supplies a value, not a binding to root.source.
+                // Pending loads keep their original server/path identity.
+                stateReader = stateReaderComponent.createObject(root, { context: next });
+            }
+        }
+        if (next.stateFile === null)
+            errorText = "File exposure is disabled for the selected tmux server";
+    }
+
+    function applyDocument(content, context) {
+        if (!Model.sameServer(context, source) || context.stateFile !== source.stateFile)
+            return;
         var document;
         try {
             document = JSON.parse(String(content || ""));
             if (!document || !Array.isArray(document.panes))
                 throw new Error("missing panes array");
+            if (!Model.sameServer(document, context))
+                throw new Error("snapshot belongs to another server generation");
         } catch (error) {
+            clearAgents();
             errorText = "Invalid tmux-argos state: " + error;
-            console.warn("midas.omalchemy:", errorText);
             return;
         }
 
-        var next = Model.normalize(document);
+        var next = Model.normalize(document, context);
         var signature = JSON.stringify(next);
         if (initialized && signature === dataSignature) {
             generatedAt = Number(document.generatedAt || 0);
             errorText = "";
             return;
         }
-
         if (initialized && notificationsEnabled) {
             var notices = Model.transitionNotices(previousStates, next);
-            var documentGeneratedAt = Number(document.generatedAt || 0);
             for (var i = 0; i < notices.length; i++)
-                enqueueNotification(notices[i], documentGeneratedAt);
+                enqueueNotification(notices[i], Number(document.generatedAt || 0));
         }
-
         previousStates = Model.stateMap(next);
         dataSignature = signature;
         agents = next;
@@ -106,11 +182,8 @@ Item {
         return location + (tmuxLocation !== "" ? "\n" + tmuxLocation : "");
     }
 
-    // Every monitor has a widget instance. The helper serializes identical
-    // events across those instances; this id also lets later state changes
-    // replace the pane's existing notification.
     function notificationId(row) {
-        var value = String(row.key || row.sessionName || "agent");
+        var value = String(row.key);
         var hash = 5381;
         for (var i = 0; i < value.length; i++)
             hash = ((hash * 33) ^ value.charCodeAt(i)) >>> 0;
@@ -140,18 +213,42 @@ Item {
         notificationProcess.running = true;
     }
 
-    FileView {
-        id: stateFile
-        path: root.statePath
-        watchChanges: true
-        printErrors: false
-        onFileChanged: reload()
-        onLoaded: root.applyDocument(text())
-        onLoadFailed: root.errorText = "State file not found: " + root.statePath
+    Component {
+        id: sourceReaderComponent
+        FileView {
+            property string requestedSocket: ""
+            watchChanges: true
+            printErrors: false
+            onFileChanged: reload()
+            onLoaded: root.applySource(text(), requestedSocket)
+            onLoadFailed: {
+                if (requestedSocket === root.configuredSocket)
+                    root.invalidateSource("Argos source file not found: " + path);
+            }
+            Component.onCompleted: reload()
+        }
     }
 
-    // FileView handles normal writes. This low-frequency fallback also covers
-    // producers which replace the file inode atomically or create it later.
+    Component {
+        id: stateReaderComponent
+        FileView {
+            property var context: null
+            path: context ? context.stateFile : ""
+            watchChanges: true
+            printErrors: false
+            onFileChanged: reload()
+            onLoaded: root.applyDocument(text(), context)
+            onLoadFailed: {
+                if (Model.sameServer(context, root.source) && context.stateFile === root.source.stateFile) {
+                    root.clearAgents();
+                    root.errorText = "State file not found: " + path;
+                }
+            }
+            Component.onCompleted: reload()
+        }
+    }
+
+    // Reload files only: covers atomic inode replacement and late creation.
     Timer {
         interval: root.pollIntervalMs
         running: true
@@ -165,5 +262,12 @@ Item {
         onExited: root.runNextNotification()
     }
 
-    Component.onCompleted: root.refresh()
+    onConfiguredSocketChanged: {
+        if (ready)
+            resetSourceReader();
+    }
+    Component.onCompleted: {
+        ready = true;
+        resetSourceReader();
+    }
 }

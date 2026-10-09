@@ -32,10 +32,32 @@ function normalizedPopupHost(value) {
   }
 }
 
-function rowKey(pane) {
-  var paneId = text(pane.paneId)
-  if (paneId !== "") return paneId
-  return text(pane.sessionName) + ":" + text(pane.windowId) + "." + text(pane.paneIndex)
+// FNV-1a64 over UTF-8, mirrored by Argos' source_socket_hash. Two 32-bit
+// halves avoid relying on BigInt support in the QML JavaScript engine.
+function socketHash(socket) {
+  var bytes = encodeURIComponent(socket).replace(/%([0-9A-F]{2})/g, function(_match, hex) {
+    return String.fromCharCode(parseInt(hex, 16))
+  })
+  var high = 0xcbf29ce4
+  var low = 0x84222325
+  for (var i = 0; i < bytes.length; i++) {
+    low = (low ^ bytes.charCodeAt(i)) >>> 0
+    var product = low * 435
+    high = (high * 435 + Math.floor(product / 4294967296) + low * 256) >>> 0
+    low = product >>> 0
+  }
+  return ("00000000" + high.toString(16)).slice(-8) + ("00000000" + low.toString(16)).slice(-8)
+}
+
+function sameServer(left, right) {
+  if (!left || !right) return false
+  return typeof left.serverSocket === "string" && left.serverSocket.charAt(0) === "/" &&
+    typeof left.serverPid === "number" && left.serverPid > 1 && Math.floor(left.serverPid) === left.serverPid &&
+    left.serverSocket === right.serverSocket && left.serverPid === right.serverPid
+}
+
+function rowKey(pane, source) {
+  return JSON.stringify([source.serverSocket, source.serverPid, text(pane.paneId)])
 }
 
 function projectName(path) {
@@ -61,7 +83,7 @@ function stateRank(state) {
   return 3
 }
 
-function normalize(document) {
+function normalize(document, source) {
   var panes = document && Array.isArray(document.panes) ? document.panes : []
   var rows = []
   for (var i = 0; i < panes.length; i++) {
@@ -70,7 +92,9 @@ function normalize(document) {
     var state = normalizedState(pane.agentState)
     var path = text(pane.currentPath)
     rows.push({
-      key: rowKey(pane),
+      key: rowKey(pane, source),
+      serverSocket: source.serverSocket,
+      serverPid: source.serverPid,
       agent: text(pane.agent).toLowerCase(),
       agentName: agentName(pane.agent),
       state: state,
@@ -141,13 +165,6 @@ function stateColor(state, idleColor) {
 function iconFile(state) {
   var value = normalizedState(state)
   return value === "idle" ? "icon.svg" : value + ".svg"
-}
-
-function target(row) {
-  if (!row) return ""
-  var session = text(row.sessionName)
-  if (session === "") return ""
-  return session + ":" + String(number(row.windowIndex)) + "." + String(number(row.paneIndex))
 }
 
 function tooltip(rows) {

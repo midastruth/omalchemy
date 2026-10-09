@@ -18,17 +18,17 @@
     "aliases": ["omalchemy", "agents", "tmux-argos"],
     "allowMultiple": false,
     "defaults": {
-      "stateFile": "~/.cache/tmux-argos/state.json",
+      "tmuxSocket": "",
       "pollIntervalMs": 2000,
       "showCount": true,
       "notifications": true
     },
     "schema": [
       {
-        "key": "stateFile",
+        "key": "tmuxSocket",
         "type": "path",
-        "label": "tmux-argos state file",
-        "defaultValue": "~/.cache/tmux-argos/state.json"
+        "label": "tmux server socket (absolute path)",
+        "defaultValue": ""
       },
       {
         "key": "pollIntervalMs",

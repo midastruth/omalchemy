@@ -1,8 +1,19 @@
 # omalchemy
 
-A Quickshell bar plugin for `~/.cache/tmux-argos/state.json`. It does not call
-`capture-pane` or infer agent state; it presents the normalized state written
-by tmux-argos and reports when a `done` pane is opened.
+A Quickshell bar plugin for tmux-argos' normalized state. Configure an absolute
+`tmuxSocket` path to select exactly one server. The display reads
+`~/.cache/tmux-argos/sources/<socket_hash>.json` and watches the `stateFile` it
+advertises. The hash is FNV-1a64 of the socket path's UTF-8 bytes, without the PID;
+`Model.socketHash` mirrors Argos' `source_socket_hash`.
+
+There is no periodic tmux/daemon discovery command and no `capture-pane` or state
+inference. The fallback timer reloads files only, covering atomic replacement
+and files created after startup. Missing/invalid descriptors, disabled file
+exposure (`stateFile: null`), and source PID/path changes clear old rows and
+notification history. Each reader captures its source identity; late loads or
+snapshots with mismatched `serverSocket`/`serverPid` are rejected. A source file is
+last-known state, not a live-server probe: an abrupt daemon crash may leave it
+until the next daemon publication.
 
 ## Bar
 
@@ -39,7 +50,14 @@ popup. Only a deleted recorded window causes a fallback to the replacement
 client's current window; deleted tmux sessions are never recreated implicitly.
 Agents without a popup preference retain the direct pane-switch behavior. After
 opening the pane, omalchemy sends tmux-argos a
-`Seen` event so a `done` state becomes `idle`. Pinned pop-out terminals are
+`Seen` event so a `done` state becomes `idle`. Only these explicit actions invoke
+tmux: every operation is bound to the row's socket and PID, including popup
+cleanup and Seen. Server restart rejects an old row even if the new server
+reuses its pane/session IDs. Targets use `%pane` and `$session` IDs, never names
+or indices; a renamed session remains usable, while a deleted ID is an error.
+PID validation also runs in the tmux command queue to close the restart race.
+Asynchronous terminal launch revalidates inside `attach-agent.sh`; Seen is
+scheduled only after a successful attachment. Pinned pop-out terminals are
 raised on the current workspace instead of jumping back to their original
 workspace. SSH and other headless clients are ignored; if no desktop client is
 attached, it opens a terminal and attaches to the target.
@@ -67,9 +85,25 @@ The plugin supports these inline `shell.json` settings:
 ```json
 {
   "id": "midas.omalchemy",
-  "stateFile": "~/.cache/tmux-argos/state.json",
+  "tmuxSocket": "/tmp/tmux-1000/default",
   "pollIntervalMs": 2000,
   "showCount": true,
   "notifications": true
 }
+```
+
+`tmuxSocket` is required; there is no implicit default server or inherited
+`TMUX` selection. Configure the socket's exact absolute path (a leading `~/`
+is expanded). Argos owns `stateFile`; omalchemy does not configure that path.
+Use an Argos version that publishes source descriptors and snapshot identities.
+
+## Verification
+
+```bash
+node tests/source_binding.mjs
+python3 tests/server_binding.py
+python3 tests/file_display.py # real Quickshell, offscreen
+python3 tests/real_operations.py # real tmux with a pseudo-terminal
+bash tests/jump-agent.sh
+shellcheck -x -P . *.sh tests/*.sh
 ```

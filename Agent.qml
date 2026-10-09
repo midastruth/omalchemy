@@ -109,20 +109,25 @@ Panel {
     function jump(row) {
         if (!row || jumpProcess.running)
             return;
+        if (!agentState || !Model.sameServer(row, agentState.source)) {
+            jumpError = "Server selection changed; refresh before opening an agent";
+            refresh();
+            return;
+        }
         jumpError = "";
         var popupHost = row.popupHost || ({});
         jumpProcess.command = [
             "bash",
             localPath(Qt.resolvedUrl("jump-agent.sh")),
+            row.serverSocket,
+            String(row.serverPid),
             row.paneId,
+            row.sessionId,
             row.sessionName,
-            String(row.windowIndex),
-            String(row.paneIndex),
             String(popupHost.client || ""),
             String(popupHost.sessionId || ""),
             String(popupHost.windowId || ""),
-            String(popupHost.paneId || ""),
-            row.popupActive ? "true" : "false"
+            String(popupHost.paneId || "")
         ];
         jumpProcess.running = true;
         close();
