@@ -6,6 +6,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || exit 1
 
 pane_id=${3-}
 session_id=${4-}
+# Desktop launchers may expand dollar-prefixed argv through systemd-run.
+# Accept the numeric transport form as well as the original immutable ID.
+if [[ $session_id =~ ^[0-9]+$ ]]; then
+  session_id="\$$session_id"
+fi
 if [[ ! "$pane_id" =~ ^%[0-9]+$ || ! "$session_id" =~ ^\$[0-9]+$ ]]; then
   printf 'midas.omalchemy: attachment requires immutable pane/session IDs\n' >&2
   exit 1

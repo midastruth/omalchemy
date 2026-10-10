@@ -279,7 +279,10 @@ fi
 if [[ -z $client_tty ]]; then
   command -v omarchy-launch-terminal >/dev/null 2>&1 \
     || fail "No desktop tmux client and no terminal launcher found"
-  omarchy-launch-terminal bash "$SCRIPT_DIR/attach-agent.sh" "$server_socket" "$server_pid" "$pane_id" "$session_id" >/dev/null 2>&1 &
+  # The launcher crosses systemd-run, which expands $N as an environment
+  # variable even when it was a quoted argv element. Transport only the numeric
+  # ID; attach-agent restores the '$' before validating and targeting tmux.
+  omarchy-launch-terminal bash "$SCRIPT_DIR/attach-agent.sh" "$server_socket" "$server_pid" "$pane_id" "${session_id#\$}" >/dev/null 2>&1 &
   exit 0
 fi
 

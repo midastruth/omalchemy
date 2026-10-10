@@ -56,8 +56,11 @@ cleanup and Seen. Server restart rejects an old row even if the new server
 reuses its pane/session IDs. Targets use `%pane` and `$session` IDs, never names
 or indices; a renamed session remains usable, while a deleted ID is an error.
 PID validation also runs in the tmux command queue to close the restart race.
-Asynchronous terminal launch revalidates inside `attach-agent.sh`; Seen is
-scheduled only after a successful attachment. Pinned pop-out terminals are
+Asynchronous terminal launch transports the session ID as its numeric suffix
+so `systemd-run` cannot expand `$N` as an environment variable. `attach-agent.sh`
+restores the immutable `$session` ID (and still accepts the original form),
+then revalidates the server and pane; Seen is scheduled only after a successful
+attachment. Pinned pop-out terminals are
 raised on the current workspace instead of jumping back to their original
 workspace. SSH and other headless clients are ignored; if no desktop client is
 attached, it opens a terminal and attaches to the target.
@@ -104,6 +107,7 @@ node tests/source_binding.mjs
 python3 tests/server_binding.py
 python3 tests/file_display.py # real Quickshell, offscreen
 python3 tests/real_operations.py # real tmux with a pseudo-terminal
+python3 tests/terminal_launch.py # real desktop launcher; briefly opens an isolated terminal
 bash tests/jump-agent.sh
 shellcheck -x -P . *.sh tests/*.sh
 ```

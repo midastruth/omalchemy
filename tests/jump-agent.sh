@@ -348,7 +348,10 @@ for _ in $(seq 1 50); do
 done
 assert_contains \
   'jump-agent retains detached-session terminal launch behavior' \
-  $'omarchy-launch-terminal\tbash\t'"$ROOT"$'/attach-agent.sh\t/tmp/tmux-test\t123\t%46\t$1'
+  $'omarchy-launch-terminal\tbash\t'"$ROOT"$'/attach-agent.sh\t/tmp/tmux-test\t123\t%46\t1'
+assert_not_contains \
+  'terminal launch transports session identity without a dollar for systemd-run' \
+  $'\t%46\t$1'
 
 printf '%s passed, %s failed\n' "$pass_count" "$fail_count"
 [[ $fail_count -eq 0 ]]

@@ -29,7 +29,8 @@ if command == 'display-message':
         sys.exit(1)
     values = {'#{socket_path},#{pid},0': '/tmp/selected.sock,'+pid+',0',
               '#{pid}': pid, '#{session_id}\x1f#{session_name}': '$1\x1frenamed-agent',
-              '#{pane_id}': '%1', '#{session_name}': 'renamed-agent', '#{session_id}': '$1'}
+              '#{pane_id}': '%1', '#{session_name}': 'renamed-agent',
+              '#{session_id}': os.environ.get('PANE_SESSION_ID', '$1')}
     print(values[args[-1]])
 elif command == 'show-option':
     if args[-1] == '@agent_daemon_binary': print(os.environ['MOCK_DAEMON'])
@@ -43,6 +44,10 @@ import json, os, sys
 assert os.environ['TMUX'] == '/tmp/selected.sock,42,0'
 assert sys.argv[1] == 'send'
 assert json.loads(sys.argv[2]) == {'type':'Seen', 'pane_id':'%1'}
+if os.environ.get('DAEMON_FAIL'):
+    print('daemon send failed', file=sys.stderr)
+    sys.exit(1)
+print('{"ok":true}')
 with open(os.environ['COMMAND_LOG'], 'a') as log:
     log.write(json.dumps(['daemon', sys.argv[1:]]) + '\n')
 '''
@@ -70,7 +75,8 @@ with tempfile.TemporaryDirectory(prefix='omalchemy-binding-') as directory:
                COMMAND_LOG=str(log), MOCK_DAEMON=str(root / 'daemon'))
     jump = ['/tmp/selected.sock', '42', '%1', '$1', 'old-session-name', '', '', '', '']
     for script, args in [('jump-agent.sh', jump), ('popup-agent.sh', ['/tmp/selected.sock', '42', '$1']),
-                         ('attach-agent.sh', ['/tmp/selected.sock', '42', '%1', '$1'])]:
+                         ('attach-agent.sh', ['/tmp/selected.sock', '42', '%1', '$1']),
+                         ('attach-agent.sh', ['/tmp/selected.sock', '42', '%1', '1'])]:
         log.write_text('')
         result = run(script, args, env)
         assert result.returncode == 0, result.stderr
@@ -101,3 +107,23 @@ with tempfile.TemporaryDirectory(prefix='omalchemy-binding-') as directory:
     assert result.returncode != 0
     assert not any(kind == 'daemon' for kind, _ in entries(log))
     print('ok - delayed Seen and terminal attachment reject a replacement PID')
+    for session in ['', 'work', '-1', '1;kill-server', '$', '$1x']:
+        log.write_text('')
+        result = run('attach-agent.sh', ['/tmp/selected.sock', '42', '%1', session], env)
+        assert result.returncode != 0, f'invalid session transport accepted: {session!r}'
+        assert entries(log) == [], 'invalid IDs must be rejected before contacting tmux'
+    for session in ['1', '$1']:
+        for failure in [{'MISSING_PANE': '1'}, {'PANE_SESSION_ID': '$2'}]:
+            log.write_text('')
+            result = run('attach-agent.sh', ['/tmp/selected.sock', '42', '%1', session],
+                         dict(env, **failure))
+            assert result.returncode != 0
+            assert not any(kind == 'daemon' or 'attach-session' in args or 'run-shell' in args
+                           for kind, args in entries(log)), 'stale attachment must not attach or report Seen'
+    print('ok - numeric and dollar session IDs retain validation and reject deleted or moved panes')
+    result = run('seen-agent.sh', ['/tmp/selected.sock', '42', '%1'], env)
+    assert result.returncode == 0 and result.stdout == '' and result.stderr == '', result
+    result = run('seen-agent.sh', ['/tmp/selected.sock', '42', '%1'], dict(env, DAEMON_FAIL='1'))
+    assert result.returncode != 0 and result.stdout == ''
+    assert 'daemon send failed' in result.stderr and 'Seen failed' in result.stderr
+    print('ok - Seen suppresses success JSON but preserves daemon failures and stderr')

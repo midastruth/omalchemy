@@ -30,7 +30,9 @@ if [[ "$actual_pid" != "$server_pid" ]]; then
   exit 1
 fi
 printf -v request '{"type":"Seen","pane_id":"%s"}' "$pane_id"
-if ! TMUX="$server_socket,$server_pid,0" "$daemon_binary" send "$request"; then
+# The daemon's JSON success acknowledgement is internal bookkeeping. Leaving
+# it on stdout makes tmux run-shell display it over the newly attached pane.
+if ! TMUX="$server_socket,$server_pid,0" "$daemon_binary" send "$request" >/dev/null; then
   printf 'midas.omalchemy: Seen failed on its original server\n' >&2
   exit 1
 fi
